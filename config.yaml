@@ -1,0 +1,16 @@
+options:
+  cluster-pool-ipv4-cidr:
+    type: string
+    default: "10.0.0.0/8"
+    description: |
+      IPv4 CIDR Range for Pods in cluster.
+  image-registry:
+    default: rocks.canonical.com:443/cdk
+    type: string
+    description: |
+      Source registry of Cilium CNI images.
+      By setting to a value, each image listed in the releases manifest
+      has its image-registry replaced.
+  release:
+    description: Version of Cilium to deploy
+    type: string

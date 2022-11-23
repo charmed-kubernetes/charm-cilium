@@ -1,0 +1,10 @@
+applications:
+  calico: null
+  kubernetes-control-plane:
+    options:
+      allow-privileged: "true"
+  cilium:
+    charm: ./cilium_ubuntu-22.04-amd64_ubuntu-20.04-amd64.charm
+relations:
+- [cilium:cni, kubernetes-control-plane:cni]
+- [cilium:cni, kubernetes-worker:cni]

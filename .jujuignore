@@ -1,0 +1,6 @@
+*.charm
+.tox/
+htmlcov/
+.coverage
+**/__pycache__/
+juju-crashdump-*

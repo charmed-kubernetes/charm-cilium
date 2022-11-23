@@ -1,0 +1,11 @@
+description: Overlay for attaching the current charm
+applications:
+  calico: null
+  kubernetes-control-plane:
+    options:
+      allow-privileged: "true"
+  cilium:
+    charm: {{charm}}
+relations:
+- [cilium:cni, kubernetes-control-plane:cni]
+- [cilium:cni, kubernetes-worker:cni]

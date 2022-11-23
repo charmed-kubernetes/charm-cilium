@@ -1,0 +1,3 @@
+ops >= 1.5.0
+lightkube
+git+https://github.com/canonical/ops-lib-manifest.git@main
