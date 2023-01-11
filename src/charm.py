@@ -6,11 +6,10 @@ import logging
 import traceback
 
 from httpx import ConnectError
-from lightkube import ApiError
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
-from ops.manifests import Collector
+from ops.manifests import Collector, ManifestClientError
 from ops.model import ActiveStatus, MaintenanceStatus, WaitingStatus
 
 from manifests import CiliumManifests
@@ -46,7 +45,7 @@ class CharmCiliumCharm(CharmBase):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources")
             self.manifests.apply_manifests()
-        except (ApiError, ConnectError):
+        except (ManifestClientError, ConnectError):
             log.error(traceback.format_exc())
             self.unit.status = WaitingStatus("Waiting to retry Cilium configuration")
 
