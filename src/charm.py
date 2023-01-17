@@ -56,7 +56,7 @@ class CharmCiliumCharm(CharmBase):
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
         for r in self.model.relations["cni"]:
             r.data[self.unit]["cidr"] = cidr
-            r.data[self.unit]["cni-conf-file"] = "05-cilium-cni.conf"
+            r.data[self.unit]["cni-conf-file"] = "05-cilium.conf"
 
     def get_kubeconfig_status(self):
         for relation in self.model.relations["cni"]:
