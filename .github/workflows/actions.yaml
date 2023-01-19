@@ -1,0 +1,109 @@
+name: Test Suite
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  call-inclusive-naming-check:
+    name: Inclusive Naming
+    uses: canonical-web-and-design/Inclusive-naming/.github/workflows/woke.yaml@main
+    with:
+      fail-on-error: "true"
+
+  lint-unit:
+    name: Lint Unit
+    uses: charmed-kubernetes/workflows/.github/workflows/lint-unit.yaml@main
+    needs: 
+      - call-inclusive-naming-check
+
+  charmcraft-build:
+    name: Build Charm
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: Install and prepare LXD snap environment
+        run: |
+          sudo apt-get remove -qy lxd lxd-client | true
+          sudo snap list lxd | true
+          sudo snap install lxd --channel=latest/stable
+          sudo snap refresh lxd --channel=latest/stable
+          sudo lxd waitready
+          sudo lxd init --auto
+          sudo chmod a+wr /var/snap/lxd/common/lxd/unix.socket
+          sudo lxc network set lxdbr0 ipv6.address none
+          sudo usermod -a -G lxd $USER
+          sg lxd -c 'lxc version'
+      - name: Remove Docker
+        run: |
+          # https://github.com/canonical/lxd-cloud/blob/f20a64a8af42485440dcbfd370faf14137d2f349/test/includes/lxd.sh#L13-L23
+          sudo rm -rf /etc/docker
+          sudo apt-get purge moby-buildx moby-engine moby-cli moby-compose moby-containerd moby-runc -y
+          sudo iptables -P FORWARD ACCEPT
+      - name: Install Charmcraft
+        run: |
+          sudo snap install charmcraft --classic --channel=latest/stable
+      - name: Build Charm
+        run: |
+          sg lxd -c 'charmcraft pack -v'
+      - name: Upload charm artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: cilium.charm
+          path: ./cilium*.charm
+      - name: Upload debug artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: charmcraft-logs
+          path: /home/runner/snap/charmcraft/common/cache/charmcraft/log/charmcraft-*.log
+
+  integration-test:
+    name: VSphere Integration Test
+    needs: 
+      - charmcraft-build
+      - lint-unit
+    runs-on: self-hosted
+    timeout-minutes: 90
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+      - name: Setup operator environment
+        uses: charmed-kubernetes/actions-operator@main
+        with:
+          provider: vsphere
+          credentials-yaml: ${{ secrets.CREDENTIALS_YAML }}
+          clouds-yaml: ${{ secrets.CLOUDS_YAML }}
+          bootstrap-constraints: "arch=amd64 cores=2 mem=4G"
+          bootstrap-options: >-
+            ${{ secrets.FOCAL_BOOTSTRAP_OPTIONS }}
+            --model-default datastore=vsanDatastore
+            --model-default primary-network=VLAN_2763
+            --model-default force-vm-hardware-version=17
+      - name: Download charm artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: cilium.charm
+      - name: Run test
+        run: tox -e integration
+      - name: Setup Debug Artifact Collection
+        if: ${{ failure() }}
+        run: mkdir tmp
+      - name: Collect Juju Status
+        if: ${{ failure() }}
+        run: |
+          juju status 2>&1 | tee tmp/juju-status.txt
+          juju-crashdump -s -m controller -a debug-layer -a config -o tmp/
+          mv juju-crashdump-* tmp/ | true
+      - name: Upload debug artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-run-artifacts
+          path: tmp
