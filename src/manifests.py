@@ -1,9 +1,13 @@
+"""Implementation of Cilium Manifests manager."""
+
 from typing import Dict
 
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests
 
 
 class CiliumManifests(Manifests):
+    """Deployment manager for the Cilium charm."""
+
     def __init__(self, charm, charm_config):
         manipulations = [ManifestLabel(self), ConfigRegistry(self)]
 

@@ -32,7 +32,7 @@ async def test_build_and_deploy(ops_test: OpsTest):
         log.info("Failed to build resources, downloading from latest/edge")
         charm_resources = ops_test.arch_specific_resources(charm)
         resources = await ops_test.download_resources(charm, resources=charm_resources)
-        resources = {rsc:rsc for rsc in resources.items()}
+        resources = {rsc: rsc for rsc in resources.items()}
 
     assert resources, "Failed to build or download resources."
     log.info(resources)
