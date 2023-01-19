@@ -6,6 +6,9 @@ applications:
       allow-privileged: "true"
   cilium:
     charm: {{charm}}
+    resources:
+      cilium: {{cilium}}
+      hubble: {{hubble}}
 relations:
 - [cilium:cni, kubernetes-control-plane:cni]
 - [cilium:cni, kubernetes-worker:cni]
