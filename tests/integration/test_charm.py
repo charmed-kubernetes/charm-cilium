@@ -25,9 +25,7 @@ async def test_build_and_deploy(ops_test: OpsTest):
     ]
 
     log.info("Rendering overlays...")
-    bundle, *overlays = await ops_test.async_render_bundles(
-        *overlays, charm=charm
-    )
+    bundle, *overlays = await ops_test.async_render_bundles(*overlays, charm=charm)
 
     log.info("Deploy charm...")
     model = ops_test.model_full_name

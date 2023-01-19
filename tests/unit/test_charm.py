@@ -3,12 +3,6 @@
 
 import unittest
 
-import ops.testing
-from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from ops.testing import Harness
-
-from charm import CharmCiliumCharm
-
 
 class TestCharm(unittest.TestCase):
     pass
