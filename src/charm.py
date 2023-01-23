@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
-
+"""Dispatch logic for the Cilium charm."""
 import logging
 import traceback
 
@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 
 class CharmCiliumCharm(CharmBase):
-    """A Juju charm for Cilium CNI"""
+    """A Juju charm for Cilium CNI."""
 
     stored = StoredState()
 
@@ -29,15 +29,15 @@ class CharmCiliumCharm(CharmBase):
         self.manifests = CiliumManifests(self, self.config)
         self.collector = Collector(self.manifests)
 
-        self.framework.observe(self.on.config_changed, self.on_config_changed)
-        self.framework.observe(self.on.cni_relation_changed, self.on_cni_relation_changed)
-        self.framework.observe(self.on.cni_relation_joined, self.on_cni_relation_joined)
-        self.framework.observe(self.on.update_status, self.on_update_status)
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.on.cni_relation_changed, self._on_cni_relation_changed)
+        self.framework.observe(self.on.cni_relation_joined, self._on_cni_relation_joined)
+        self.framework.observe(self.on.update_status, self._on_update_status)
 
-    def configure_cilium(self):
+    def _configure_cilium(self):
         self.stored.cilium_configured = False
 
-        if not self.get_kubeconfig_status():
+        if not self._get_kubeconfig_status():
             self.unit.status = WaitingStatus("Waiting K8s API")
             return
 
@@ -51,39 +51,39 @@ class CharmCiliumCharm(CharmBase):
 
         self.stored.cilium_configured = True
 
-    def configure_cni_relation(self):
+    def _configure_cni_relation(self):
         self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
         for r in self.model.relations["cni"]:
             r.data[self.unit]["cidr"] = cidr
             r.data[self.unit]["cni-conf-file"] = "05-cilium.conf"
 
-    def get_kubeconfig_status(self):
+    def _get_kubeconfig_status(self):
         for relation in self.model.relations["cni"]:
             for unit in relation.units:
                 if relation.data[unit].get("kubeconfig-hash"):
                     return True
         return False
 
-    def on_config_changed(self, _):
-        self.configure_cni_relation()
-        self.configure_cilium()
-        self.set_active_status()
+    def _on_config_changed(self, _):
+        self._configure_cni_relation()
+        self._configure_cilium()
+        self._set_active_status()
 
-    def on_cni_relation_changed(self, _):
-        self.configure_cilium()
-        self.set_active_status()
+    def _on_cni_relation_changed(self, _):
+        self._configure_cilium()
+        self._set_active_status()
 
-    def on_cni_relation_joined(self, _):
-        self.configure_cni_relation()
-        self.set_active_status()
+    def _on_cni_relation_joined(self, _):
+        self._configure_cni_relation()
+        self._set_active_status()
 
-    def on_update_status(self, _):
+    def _on_update_status(self, _):
         if not self.stored.cilium_configured:
-            self.configure_cilium()
-        self.set_active_status()
+            self._configure_cilium()
+        self._set_active_status()
 
-    def set_active_status(self):
+    def _set_active_status(self):
         if self.stored.cilium_configured:
             self.unit.status = ActiveStatus("Ready")
 
