@@ -6,9 +6,12 @@
 import logging
 import os
 import tarfile
+import tempfile
 import traceback
+from functools import lru_cache
 from pathlib import Path
 from subprocess import check_output
+from tarfile import TarError
 
 from httpx import ConnectError
 from ops.charm import CharmBase
@@ -23,7 +26,6 @@ log = logging.getLogger(__name__)
 
 CLI_CLIENTS_PATH = Path("/usr/local/bin")
 RESOURCES = ["cilium", "hubble"]
-TMP_PATH = Path("/tmp")
 
 
 class CharmCiliumCharm(CharmBase):
@@ -44,6 +46,7 @@ class CharmCiliumCharm(CharmBase):
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
 
+    @lru_cache
     def _arch(self):
         architecture = check_output(["dpkg", "--print-architecture"]).rstrip()
         architecture = architecture.decode("utf-8")
@@ -92,15 +95,7 @@ class CharmCiliumCharm(CharmBase):
                 filename = f"{rsc}-linux-{arch}.tar.gz"
                 log.info(f"Extracting {rsc} binary from {filename}")
                 path = self.model.resources.fetch(rsc)
-                # Extract only the required arch tar.gz file from the bundle
-                tar = tarfile.open(path)
-                tar.extractall(TMP_PATH, members=self._get_arch_cli_tools(tar, filename))
-                tar.close()
-                # Extract the binary
-                tar = tarfile.open(TMP_PATH / filename)
-                tar.extractall(CLI_CLIENTS_PATH)
-                tar.close()
-                os.chmod(CLI_CLIENTS_PATH / rsc, 0o755)
+                self._unpack_archive(path, filename)
 
         except ModelError as e:
             self.unit.status = BlockedStatus("Unable to claim the CLI resources.")
@@ -110,8 +105,9 @@ class CharmCiliumCharm(CharmBase):
             self.unit.status = BlockedStatus("CLI resources missing.")
             log.error(e)
             return
-        except Exception as e:
-            log.error(f"CLI binaries could not be installed: {e}")
+        except (PermissionError, TarError):
+            self.unit.status = BlockedStatus("Error unpacking CLI binaries.")
+            log.exception("CLI binaries could not be installed.")
             return
 
     def _on_config_changed(self, _):
@@ -141,6 +137,18 @@ class CharmCiliumCharm(CharmBase):
         if self.stored.cilium_configured:
             self.unit.status = ActiveStatus("Ready")
             self.unit.set_workload_version(self.collector.short_version)
+
+    def _unpack_archive(self, path, filename):
+        # Extract only the required arch tar.gz file from the bundle
+        tar = tarfile.open(path)
+        with tempfile.TemporaryDirectory() as tmp:
+            tar.extractall(tmp, members=self._get_arch_cli_tools(tar, filename))
+            tar.close()
+            # Extract the binary
+            arch_tgz = tarfile.open(tmp / filename)
+            arch_tgz.extractall(CLI_CLIENTS_PATH)
+            arch_tgz.close()
+        os.chmod(CLI_CLIENTS_PATH / os.path.basename(path), 0o755)
 
 
 if __name__ == "__main__":  # pragma: nocover
