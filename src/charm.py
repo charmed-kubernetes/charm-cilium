@@ -5,9 +5,10 @@
 
 import logging
 import os
-import shutil
+import tarfile
 import traceback
 from pathlib import Path
+from subprocess import check_output
 
 from httpx import ConnectError
 from ops.charm import CharmBase
@@ -20,7 +21,9 @@ from manifests import CiliumManifests
 
 log = logging.getLogger(__name__)
 
+CLI_CLIENTS_PATH = Path("/usr/local/bin")
 RESOURCES = ["cilium", "hubble"]
+TMP_PATH = Path("/tmp")
 
 
 class CharmCiliumCharm(CharmBase):
@@ -40,6 +43,11 @@ class CharmCiliumCharm(CharmBase):
         self.framework.observe(self.on.cni_relation_joined, self._on_cni_relation_joined)
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
+
+    def _arch(self):
+        architecture = check_output(["dpkg", "--print-architecture"]).rstrip()
+        architecture = architecture.decode("utf-8")
+        return architecture
 
     def _configure_cilium(self):
         self.stored.cilium_configured = False
@@ -72,13 +80,27 @@ class CharmCiliumCharm(CharmBase):
                     return True
         return False
 
+    def _get_arch_cli_tools(self, members, name):
+        for tarinfo in members:
+            if tarinfo.name == name:
+                yield tarinfo
+
     def _install_cli_resources(self):
         try:
-            cli_clients_path = Path("/usr/local/bin")
             for rsc in RESOURCES:
+                arch = self._arch()
+                filename = f"{rsc}-linux-{arch}.tar.gz"
+                log.info(f"Extracting {rsc} binary from {filename}")
                 path = self.model.resources.fetch(rsc)
-                shutil.copy(path, cli_clients_path)
-                os.chmod(cli_clients_path / rsc, 0o755)
+                # Extract only the required arch tar.gz file from the bundle
+                tar = tarfile.open(path)
+                tar.extractall(TMP_PATH, members=self._get_arch_cli_tools(tar, filename))
+                tar.close()
+                # Extract the binary
+                tar = tarfile.open(TMP_PATH / filename)
+                tar.extractall(CLI_CLIENTS_PATH)
+                tar.close()
+                os.chmod(CLI_CLIENTS_PATH / rsc, 0o755)
 
         except ModelError as e:
             self.unit.status = BlockedStatus("Unable to claim the CLI resources.")
@@ -88,8 +110,8 @@ class CharmCiliumCharm(CharmBase):
             self.unit.status = BlockedStatus("CLI resources missing.")
             log.error(e)
             return
-        except PermissionError as e:
-            log.error(f"Cannot copy CLI binaries {e}")
+        except Exception as e:
+            log.error(f"CLI binaries could not be installed: {e}")
             return
 
     def _on_config_changed(self, _):

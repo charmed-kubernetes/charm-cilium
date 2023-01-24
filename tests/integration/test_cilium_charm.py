@@ -21,13 +21,12 @@ async def test_build_and_deploy(ops_test: OpsTest):
         charm = await ops_test.build_charm(".")
 
     build_script = Path.cwd() / "fetch-resources.sh"
-    await ops_test.build_resources(build_script, with_sudo=False)
-    resources = list(Path(ops_test.tmp_path / "resources").glob("*"))
+    resources = await ops_test.build_resources(build_script, with_sudo=False)
     expected_resources = {"cilium", "hubble"}
 
-    log.info(resources)
-    if resources and all(rsc.stem in expected_resources for rsc in resources):
-        resources = {rsc.stem: rsc for rsc in resources}
+    if resources and all(rsc.stem.split(".")[0] in expected_resources for rsc in resources):
+        resources = {rsc.stem.split(".")[0]: rsc for rsc in resources}
+        log.info(resources)
     else:
         log.info("Failed to build resources, downloading from latest/edge")
         charm_resources = ops_test.arch_specific_resources(charm)

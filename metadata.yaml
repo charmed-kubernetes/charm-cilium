@@ -17,11 +17,11 @@ requires:
 resources:
   cilium:
     type: file
-    filename: cilium
+    filename: cilium.tar.gz
     description: |
       CLI to install, manage & troubleshoot Kubernetes clusters running Cilium.
   hubble:
     type: file
-    filename: hubble
+    filename: hubble.tar.gz
     description: |
       CLI to access the observability data collected by Hubble.
