@@ -4,7 +4,6 @@
 """Dispatch logic for the Cilium charm."""
 
 import logging
-import os
 import tarfile
 import tempfile
 import traceback
@@ -148,7 +147,6 @@ class CharmCiliumCharm(CharmBase):
             arch_tgz = tarfile.open(Path(tmp) / filename)
             arch_tgz.extractall(CLI_CLIENTS_PATH)
             arch_tgz.close()
-        os.chmod(CLI_CLIENTS_PATH / os.path.basename(path), 0o755)
 
 
 if __name__ == "__main__":  # pragma: nocover
