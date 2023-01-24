@@ -145,7 +145,7 @@ class CharmCiliumCharm(CharmBase):
             tar.extractall(tmp, members=self._get_arch_cli_tools(tar, filename))
             tar.close()
             # Extract the binary
-            arch_tgz = tarfile.open(tmp / filename)
+            arch_tgz = tarfile.open(Path(tmp) / filename)
             arch_tgz.extractall(CLI_CLIENTS_PATH)
             arch_tgz.close()
         os.chmod(CLI_CLIENTS_PATH / os.path.basename(path), 0o755)
