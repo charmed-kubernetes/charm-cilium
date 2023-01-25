@@ -14,3 +14,14 @@ requires:
   cni:
     interface: kubernetes-cni
     scope: container
+resources:
+  cilium:
+    type: file
+    filename: cilium.tar.gz
+    description: |
+      CLI to install, manage & troubleshoot Kubernetes clusters running Cilium.
+  hubble:
+    type: file
+    filename: hubble.tar.gz
+    description: |
+      CLI to access the observability data collected by Hubble.
