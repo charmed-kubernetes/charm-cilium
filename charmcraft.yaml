@@ -4,6 +4,7 @@ parts:
     build-packages: [git]
     prime:
       - upstream/**
+      - services/**
 bases:
   - build-on:
     - name: ubuntu
