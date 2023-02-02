@@ -117,15 +117,8 @@ class CharmCiliumCharm(CharmBase):
                 yield tarinfo
 
     def _get_service_status(self, service_name):
-        try:
-            result = subprocess.run(
-                ["systemctl", "is-active", service_name],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            return result.returncode
-        except subprocess.CalledProcessError:
-            log.exception(f"Failed to get {service_name} status.")
+        """Checks if service is active, returns 0 on success, otherwise non-zero value."""
+        return subprocess.call(["systemctl", "is-active", service_name])
 
     def _install_cli_resources(self):
         self._manage_port_forward_service()
@@ -154,7 +147,7 @@ class CharmCiliumCharm(CharmBase):
         try:
             service_path = Path("/etc/systemd/system")
             shutil.copy(service_file_path, service_path)
-            subprocess.run(["systemctl", "daemon-reload"])
+            subprocess.check_call(["systemctl", "daemon-reload"])
         except subprocess.CalledProcessError:
             log.exception("Failed to reload systemd daemons.")
         except OSError:
@@ -163,11 +156,12 @@ class CharmCiliumCharm(CharmBase):
     def _manage_port_forward_service(self, enable=False):
         try:
             if enable:
-                subprocess.run(["systemctl", "enable", PORT_FORWARD_SERVICE], check=True)
-                subprocess.run(["systemctl", "start", PORT_FORWARD_SERVICE], check=True)
+                subprocess.check_call(["systemctl", "enable", PORT_FORWARD_SERVICE])
+                subprocess.check_call(["systemctl", "start", PORT_FORWARD_SERVICE])
             else:
-                subprocess.run(["systemctl", "disable", PORT_FORWARD_SERVICE], check=True)
-                subprocess.run(["systemctl", "stop", PORT_FORWARD_SERVICE], check=True)
+                subprocess.check_call(["systemctl", "disable", PORT_FORWARD_SERVICE])
+                subprocess.check_call(["systemctl", "stop", PORT_FORWARD_SERVICE])
+
             self.unit.status = WaitingStatus("Waiting Hubble port-forward service.")
         except subprocess.CalledProcessError:
             log.exception(f"Failed to modify {PORT_FORWARD_SERVICE} service")
@@ -175,9 +169,9 @@ class CharmCiliumCharm(CharmBase):
     def _on_config_changed(self, _):
         self._configure_cni_relation()
         self._configure_cilium()
-        self._set_active_status()
         self._install_cli_resources()
         self._on_port_forward_hubble()
+        self._set_active_status()
 
     def _on_cni_relation_changed(self, _):
         self._configure_cilium()
