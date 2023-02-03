@@ -184,7 +184,7 @@ class CharmCiliumCharm(CharmBase):
         self._configure_cilium(event)
         self._install_cli_resources()
         self._on_port_forward_hubble()
-        self._set_active_status(event)
+        self._set_active_status()
 
     def _on_cni_relation_changed(self, _):
         self._configure_cilium()
@@ -221,7 +221,7 @@ class CharmCiliumCharm(CharmBase):
         self.stored.cilium_configured = False
         self._install_cli_resources()
 
-    def _set_active_status(self, _):
+    def _set_active_status(self):
         if self.stored.cilium_configured:
             if self.model.config["enable-hubble"] and not self.stored.hubble_configured:
                 return
