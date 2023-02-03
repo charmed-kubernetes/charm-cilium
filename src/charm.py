@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-import traceback
 from functools import lru_cache
 from pathlib import Path
 from subprocess import check_output
@@ -59,26 +58,38 @@ class CharmCiliumCharm(CharmBase):
         architecture = architecture.decode("utf-8")
         return architecture
 
-    def _configure_cilium(self):
+    def _check_port_forward_service(self):
+        if self.stored.hubble_mismatch_config:
+            self.unit.status = BlockedStatus("Enable Hubble to use Hubble port-forward service.")
+            return
+        rc = self._get_service_status(PORT_FORWARD_SERVICE)
+        waiting_msg = "Waiting Hubble port-forward service."
+        if self.model.config["port-forward-hubble"]:
+            if rc:
+                self.unit.status = WaitingStatus(waiting_msg)
+        elif not rc:
+            self.unit.status = WaitingStatus(waiting_msg)
+
+    def _configure_cilium(self, event):
         self.stored.cilium_configured = False
 
         if not self._get_kubeconfig_status():
-            self.unit.status = WaitingStatus("Waiting K8s API")
-            return
+            return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
 
         log.info("Applying Cilium manifests")
-        self._configure_cilium_cni()
-        self._configure_hubble()
+        self._configure_cilium_cni(event)
+        self._configure_hubble(event)
 
         self.stored.cilium_configured = True
 
-    def _configure_cilium_cni(self):
+    def _configure_cilium_cni(self, event):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
             self.cilium_manifests.apply_manifests()
         except (ManifestClientError, ConnectError):
-            log.error(traceback.format_exc())
-            self.unit.status = WaitingStatus("Waiting to retry Cilium configuration.")
+            return self._ops_wait_for(
+                event, "Waiting to retry Cilium configuration.", exc_info=True
+            )
 
     def _configure_cni_relation(self):
         self.unit.status = MaintenanceStatus("Configuring CNI relation")
@@ -87,22 +98,24 @@ class CharmCiliumCharm(CharmBase):
             r.data[self.unit]["cidr"] = cidr
             r.data[self.unit]["cni-conf-file"] = "05-cilium.conf"
 
-    def _configure_hubble(self):
+    def _configure_hubble(self, event):
         if self.model.config["enable-hubble"]:
             try:
                 self.unit.status = MaintenanceStatus("Applying Hubble resources.")
                 self.hubble_manifests.apply_manifests()
+                self.stored.hubble_configured = True
             except (ManifestClientError, ConnectError):
-                self.unit.status = WaitingStatus("Waiting to retry Hubble configuration.")
-                log.exception("K8s API not ready.")
-            self.stored.hubble_configured = True
+                return self._ops_wait_for(
+                    event, "Waiting to retry Hubble configuration.", exc_info=True
+                )
+
         elif self.stored.hubble_configured:
             try:
                 self.unit.status = MaintenanceStatus("Removing Hubble resources.")
                 self.hubble_manifests.delete_manifests()
+                self.stored.hubble_configured = False
             except (ManifestClientError, ConnectError):
-                log.exception("K8s API not ready.")
-            self.stored.hubble_configured = False
+                return self._ops_wait_for(event, "Waiting to retry Hubble removal.", exc_info=True)
 
     def _get_kubeconfig_status(self):
         for relation in self.model.relations["cni"]:
@@ -166,12 +179,12 @@ class CharmCiliumCharm(CharmBase):
         except subprocess.CalledProcessError:
             log.exception(f"Failed to modify {PORT_FORWARD_SERVICE} service")
 
-    def _on_config_changed(self, _):
+    def _on_config_changed(self, event):
         self._configure_cni_relation()
-        self._configure_cilium()
+        self._configure_cilium(event)
         self._install_cli_resources()
         self._on_port_forward_hubble()
-        self._set_active_status()
+        self._set_active_status(event)
 
     def _on_cni_relation_changed(self, _):
         self._configure_cilium()
@@ -195,28 +208,23 @@ class CharmCiliumCharm(CharmBase):
                 self.stored.hubble_mismatch_config = True
 
     def _on_update_status(self, _):
-        if not self.stored.cilium_configured:
-            self._configure_cilium()
         self._set_active_status()
+
+    def _ops_wait_for(self, event, msg, exc_info=None):
+        self.unit.status = WaitingStatus(msg)
+        if exc_info:
+            log.exception(msg)
+        event.defer()
+        return msg
 
     def _on_upgrade_charm(self, _):
         self.stored.cilium_configured = False
         self._install_cli_resources()
 
-    def _check_port_forward_service(self):
-        if self.stored.hubble_mismatch_config:
-            self.unit.status = BlockedStatus("Enable Hubble to use Hubble port-forward service.")
-            return
-        rc = self._get_service_status(PORT_FORWARD_SERVICE)
-        waiting_msg = "Waiting Hubble port-forward service."
-        if self.model.config["port-forward-hubble"]:
-            if rc:
-                self.unit.status = WaitingStatus(waiting_msg)
-        elif not rc:
-            self.unit.status = WaitingStatus(waiting_msg)
-
-    def _set_active_status(self):
+    def _set_active_status(self, _):
         if self.stored.cilium_configured:
+            if self.model.config["enable-hubble"] and not self.stored.hubble_configured:
+                return
             self.unit.status = ActiveStatus("Ready")
             self.unit.set_workload_version(self.collector.short_version)
         self._check_port_forward_service()
