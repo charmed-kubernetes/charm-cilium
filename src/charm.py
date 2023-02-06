@@ -186,8 +186,8 @@ class CharmCiliumCharm(CharmBase):
         self._on_port_forward_hubble()
         self._set_active_status()
 
-    def _on_cni_relation_changed(self, _):
-        self._configure_cilium()
+    def _on_cni_relation_changed(self, event):
+        self._configure_cilium(event)
         self._set_active_status()
 
     def _on_cni_relation_joined(self, _):
