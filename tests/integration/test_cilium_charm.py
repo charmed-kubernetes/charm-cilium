@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import re
 import shlex
 from pathlib import Path
 
@@ -61,15 +62,56 @@ async def test_build_and_deploy(ops_test: OpsTest):
 
 async def test_cli_resources(ops_test: OpsTest):
     units = ops_test.model.applications["cilium"].units
-    machines = [u.machine.entity_id for u in units]
     cmds = ["hubble --version", "cilium version"]
 
-    for m in machines:
-        for cmd in cmds:
-            juju_cmd = f"ssh {m} -- {cmd}"
-            log.info(f"Running {cmd} on {m}")
-            await ops_test.juju(
-                *shlex.split(juju_cmd),
-                check=True,
-                fail_msg=f"Failed to execute {cmd} on machine: {m}",
-            )
+    for unit in units:
+        cmd = " && ".join(cmds)
+        log.info(f"Running {cmd} on {unit.machine.hostname}")
+        action = await unit.run(cmd, timeout=60, block=True)
+        assert (
+            action.status == "completed" and action.results["return-code"] == 0
+        ), f"Failed to execute {cmd} on machine: {unit.machine.hostname}\n{action.results}"
+
+
+@pytest.fixture
+async def active_hubble(ops_test, hubble_test_resources):
+    log.info("Enabling Hubble...")
+    cilium_app = ops_test.model.applications["cilium"]
+    await cilium_app.set_config({"enable-hubble": "true", "port-forward-hubble": "true"})
+    await ops_test.model.wait_for_idle(status="active", timeout=5 * 60)
+
+    yield
+
+    log.info("Removing Hubble and port-forward service...")
+    await cilium_app.set_config({"enable-hubble": "false", "port-forward-hubble": "false"})
+    await ops_test.model.wait_for_idle(status="active", timeout=5 * 60)
+
+
+async def test_hubble(ops_test, active_hubble, kubectl_exec):
+    cilium_app = ops_test.model.applications["cilium"]
+    cilium = cilium_app.units[0]
+
+    allowed_req = "curl -s -XPOST deathstar.default.svc.cluster.local/v1/request-landing"
+    denied_req = "curl -s -XPUT deathstar.default.svc.cluster.local/v1/exhaust-port"
+
+    log.info("Creating requests...")
+    await kubectl_exec("tiefighter", "default", allowed_req)
+    await kubectl_exec("tiefighter", "default", denied_req)
+
+    log.info("Retrieving logs from Hubble...")
+    cmd = "hubble observe --pod deathstar --protocol http"
+    stdout = None
+    while not stdout:
+        action = await cilium.run(cmd, timeout=10, block=True)
+        assert (
+            action.status == "completed" and action.results["return-code"] == 0
+        ), f"Failed to fetch Hubble logs {cmd} on machine: {cilium.machine.hostname}\n{action.results}"
+        stdout = action.results.get("stdout")
+
+    forwarded = len(re.findall("FORWARDED", stdout))
+    dropped = len(re.findall("DROPPED", stdout))
+    # The requests creates three records: The first one is allowed, therefore it will
+    # create two FORWARDED records. As for the denied request, Hubble will create a
+    # DROPPED one.
+    assert forwarded >= 2, f"Not enough forwarded in stdout\n{stdout}"
+    assert dropped >= 1, f"Not enough dropped in stdout\n{stdout}"
