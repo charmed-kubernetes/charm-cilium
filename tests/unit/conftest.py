@@ -11,22 +11,14 @@ ops.testing.SIMULATE_CAN_CONNECT = True
 
 
 def pytest_configure(config):
-    config.addinivalue_line(
-        "markers",
-        "skip_install_service: mark tests which do not mock out _install_service.",
-    )
-    config.addinivalue_line(
-        "markers",
-        "skip_install_cli_resources: mark tests which do not mock out _install_cli_resources",
-    )
-    config.addinivalue_line(
-        "markers",
-        "skip_get_service_status: mark tests which do not mock out _get_service_status",
-    )
-    config.addinivalue_line(
-        "markers",
-        "skip_manage_port_forward_service: mark tests which do not mock out _manage_port_forward_service",
-    )
+    markers = {
+        "skip_install_service": "mark tests which do not mock out _install_service.",
+        "skip_install_cli_resources": "mark tests which do not mock out _install_cli_resources",
+        "skip_get_service_status": "mark tests which do not mock out _get_service_status",
+        "skip_manage_port_forward_service": "mark tests which do not mock out _manage_port_forward_service",
+    }
+    for marker, description in markers.items():
+        config.addinivalue_line("markers", f"{marker}: {description}")
 
 
 @pytest.fixture
@@ -41,20 +33,15 @@ def harness():
 @pytest.fixture
 def charm(request, harness: Harness[CiliumCharm]):
     with contextlib.ExitStack() as stack:
-        if "skip_install_service" not in request.keywords:
-            stack.enter_context(mock.patch("charm.CiliumCharm._install_service", mock.MagicMock()))
-        if "skip_install_cli_resources" not in request.keywords:
-            stack.enter_context(
-                mock.patch("charm.CiliumCharm._install_cli_resources", mock.MagicMock())
-            )
-        if "skip_get_service_status" not in request.keywords:
-            stack.enter_context(
-                mock.patch("charm.CiliumCharm._get_service_status", mock.MagicMock())
-            )
-        if "skip_manage_port_forward_service" not in request.keywords:
-            stack.enter_context(
-                mock.patch("charm.CiliumCharm._manage_port_forward_service", mock.MagicMock())
-            )
+        methods_to_mock = {
+            "_install_service": "skip_install_service",
+            "_install_cli_resources": "skip_install_cli_resources",
+            "_get_service_status": "skip_get_service_status",
+            "_manage_port_forward_service": "skip_manage_port_forward_service",
+        }
+        for method, marker in methods_to_mock.items():
+            if marker not in request.keywords:
+                stack.enter_context(mock.patch(f"charm.CiliumCharm.{method}", mock.MagicMock()))
 
         harness.begin_with_initial_hooks()
         yield harness.charm
