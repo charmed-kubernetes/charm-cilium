@@ -30,7 +30,7 @@ PORT_FORWARD_SERVICE = "hubble-port-forward.service"
 RESOURCES = ["cilium", "hubble"]
 
 
-class CharmCiliumCharm(CharmBase):
+class CiliumCharm(CharmBase):
     """A Juju charm for Cilium CNI."""
 
     stored = StoredState()
@@ -242,4 +242,4 @@ class CharmCiliumCharm(CharmBase):
 
 
 if __name__ == "__main__":  # pragma: nocover
-    main(CharmCiliumCharm)
+    main(CiliumCharm)
