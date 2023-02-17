@@ -52,7 +52,7 @@ class CiliumCharm(CharmBase):
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
 
-    @lru_cache
+    @lru_cache()
     def _arch(self):
         architecture = check_output(["dpkg", "--print-architecture"]).rstrip()
         architecture = architecture.decode("utf-8")
