@@ -4,6 +4,21 @@ options:
     default: "10.0.0.0/8"
     description: |
       IPv4 CIDR Range for Pods in cluster.
+
+      The default value is obtained from upstream at the following link:
+        https://docs.cilium.io/en/stable/cmdref/cilium-operator/
+      For more information about configuring this value, please visit:
+        https://docs.cilium.io/en/v1.12/concepts/networking/ipam/cluster-pool/
+  cluster-pool-ipv4-mask-size:
+    type: string
+    default: "24"
+    description: |
+      Mask size for each IPv4 podCIDR per node.
+
+      The default value is obtained from upstream at the following link:
+        https://docs.cilium.io/en/stable/cmdref/cilium-operator/
+      For more information about configuring this value, please visit:
+        https://docs.cilium.io/en/v1.12/concepts/networking/ipam/cluster-pool/
   enable-hubble:
     type: boolean
     default: false
