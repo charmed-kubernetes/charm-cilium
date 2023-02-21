@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-from functools import lru_cache
+from functools import cached_property
 from pathlib import Path
 from subprocess import check_output
 from tarfile import TarError
@@ -52,7 +52,7 @@ class CiliumCharm(CharmBase):
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
 
-    @lru_cache()
+    @cached_property
     def _arch(self):
         architecture = check_output(["dpkg", "--print-architecture"]).rstrip()
         architecture = architecture.decode("utf-8")
@@ -137,7 +137,7 @@ class CiliumCharm(CharmBase):
         self._manage_port_forward_service()
         try:
             for rsc in RESOURCES:
-                arch = self._arch()
+                arch = self._arch
                 filename = f"{rsc}-linux-{arch}.tar.gz"
                 log.info(f"Extracting {rsc} binary from {filename}")
                 path = self.model.resources.fetch(rsc)

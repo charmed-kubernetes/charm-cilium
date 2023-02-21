@@ -32,6 +32,11 @@ def harness():
 
 @pytest.fixture
 def charm(request, harness: Harness[CiliumCharm]):
+    """Create a charm with mocked methods.
+
+    This fixture utilizes ExitStack to dynamically mock methods in the Cilium Charm,
+    using the request markers defined in the `pytest_configure` method.
+    """
     with contextlib.ExitStack() as stack:
         methods_to_mock = {
             "_install_service": "skip_install_service",

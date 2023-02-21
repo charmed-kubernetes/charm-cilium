@@ -19,7 +19,7 @@ def test_arch(charm):
     expected_arch = "amd64"
     with mock.patch("charm.subprocess.check_output") as mock_check_output:
         mock_check_output.return_value = expected_arch.encode("utf-8")
-        result = charm._arch()
+        result = charm._arch
         assert result == expected_arch
 
 
