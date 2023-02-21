@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-from functools import lru_cache
+from functools import cached_property
 from pathlib import Path
 from subprocess import check_output
 from tarfile import TarError
@@ -30,7 +30,7 @@ PORT_FORWARD_SERVICE = "hubble-port-forward.service"
 RESOURCES = ["cilium", "hubble"]
 
 
-class CharmCiliumCharm(CharmBase):
+class CiliumCharm(CharmBase):
     """A Juju charm for Cilium CNI."""
 
     stored = StoredState()
@@ -52,7 +52,7 @@ class CharmCiliumCharm(CharmBase):
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
 
-    @lru_cache
+    @cached_property
     def _arch(self):
         architecture = check_output(["dpkg", "--print-architecture"]).rstrip()
         architecture = architecture.decode("utf-8")
@@ -137,7 +137,7 @@ class CharmCiliumCharm(CharmBase):
         self._manage_port_forward_service()
         try:
             for rsc in RESOURCES:
-                arch = self._arch()
+                arch = self._arch
                 filename = f"{rsc}-linux-{arch}.tar.gz"
                 log.info(f"Extracting {rsc} binary from {filename}")
                 path = self.model.resources.fetch(rsc)
@@ -242,4 +242,4 @@ class CharmCiliumCharm(CharmBase):
 
 
 if __name__ == "__main__":  # pragma: nocover
-    main(CharmCiliumCharm)
+    main(CiliumCharm)

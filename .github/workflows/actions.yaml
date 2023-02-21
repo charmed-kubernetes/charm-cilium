@@ -12,15 +12,20 @@ jobs:
     with:
       fail-on-error: "true"
 
+
   lint-unit:
     name: Lint Unit
     uses: charmed-kubernetes/workflows/.github/workflows/lint-unit.yaml@main
+    with:
+      python: "['3.8', '3.9', '3.10', '3.11']"
     needs: 
       - call-inclusive-naming-check
 
   charmcraft-build:
     name: Build Charm
     runs-on: ubuntu-22.04
+    needs:
+      - lint-unit
     steps:
       - name: Check out code
         uses: actions/checkout@v3
