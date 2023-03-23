@@ -19,11 +19,26 @@ options:
         https://docs.cilium.io/en/stable/cmdref/cilium-operator/
       For more information about configuring this value, please visit:
         https://docs.cilium.io/en/v1.12/concepts/networking/ipam/cluster-pool/
+  enable-cilium-metrics:
+    type: boolean
+    default: false
+    description: |
+      Expose Prometheus metrics for the Cilium CNI components.
   enable-hubble:
     type: boolean
     default: false
     description: |
       Enable the Hubble Observability stack for Cilium.
+  enable-hubble-metrics:
+    type: string
+    default: ""
+    description: |
+      Expose Prometheus metrics for the Hubble Observability components.
+      
+      The configuration value should include the desired values to scrape from
+      Hubble in a space separated list.
+      For more information about configuring this value, please visit:
+        https://docs.cilium.io/en/latest/observability/metrics/#hubble-exported-metrics
   image-registry:
     default: rocks.canonical.com:443/cdk
     type: string

@@ -10,10 +10,15 @@ description: |
 source: https://github.com/charmed-kubernetes/charm-cilium
 issues: https://bugs.launchpad.net/charm-cilium
 subordinate: true
+provides:
+  grafana-dashboard:
+    interface: grafana_dashboard
 requires:
   cni:
     interface: kubernetes-cni
     scope: container
+  send-remote-write:
+    interface: prometheus_remote_write
 resources:
   cilium:
     type: file
