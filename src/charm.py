@@ -47,7 +47,10 @@ class CiliumCharm(CharmBase):
         super().__init__(*args)
 
         self.stored.set_default(
-            cilium_configured=False, hubble_configured=False, hubble_mismatch_config=False
+            cilium_configured=False,
+            hubble_configured=False,
+            hubble_mismatch_config=False,
+            unallowed_metrics=False,
         )
 
         self.hubble_metrics: List[str] = []
@@ -105,9 +108,8 @@ class CiliumCharm(CharmBase):
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
 
         log.info("Applying Cilium manifests")
-        self._configure_hubble_metrics()
-        self._configure_cilium_cni(event)
         self._configure_hubble(event)
+        self._configure_cilium_cni(event)
 
         self.stored.cilium_configured = True
 
@@ -131,6 +133,7 @@ class CiliumCharm(CharmBase):
         if self.model.config["enable-hubble"]:
             try:
                 self.unit.status = MaintenanceStatus("Applying Hubble resources.")
+                self._configure_hubble_metrics()
                 self.hubble_manifests.apply_manifests()
                 self.stored.hubble_configured = True
             except (ManifestClientError, ConnectError):
@@ -140,6 +143,7 @@ class CiliumCharm(CharmBase):
             except (ValidationError, ValueError):
                 msg = "Hubble Metrics should only contain valid metrics values."
                 self.unit.status = BlockedStatus(msg)
+                self.stored.unallowed_metrics = True
                 log.exception(msg)
                 return
 
@@ -152,13 +156,13 @@ class CiliumCharm(CharmBase):
                 return self._ops_wait_for(event, "Waiting to retry Hubble removal.", exc_info=True)
 
     def _configure_hubble_metrics(self):
-        values = self.model.config["enable-hubble-metrics"]
-        if values:
+        if values := self.model.config["enable-hubble-metrics"]:
             try:
                 values = values.split()
                 valid_metrics = HubbleMetrics(metrics=values)
                 self.hubble_metrics.clear()
                 self.hubble_metrics.extend(valid_metrics.metrics)
+                self.stored.unallowed_metrics = False
             except ValueError:
                 raise
 
@@ -302,11 +306,18 @@ class CiliumCharm(CharmBase):
         return template.render(**kwargs)
 
     def _set_active_status(self):
-        if self.stored.cilium_configured:
-            if self.model.config["enable-hubble"] and not self.stored.hubble_configured:
-                return
-            self.unit.status = ActiveStatus("Ready")
-            self.unit.set_workload_version(self.collector.short_version)
+        if not self.stored.cilium_configured:
+            return
+
+        if self.model.config.get("enable-hubble") and not self.stored.hubble_configured:
+            return
+
+        if self.stored.unallowed_metrics:
+            return
+
+        self.unit.status = ActiveStatus("Ready")
+        self.unit.set_workload_version(self.collector.short_version)
+
         self._check_port_forward_service()
 
     def _unpack_archive(self, path, filename):

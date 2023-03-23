@@ -9,11 +9,6 @@ class HubbleMetrics(BaseModel):
 
     metrics: List[str]
 
-    @property
-    def allowed_values(self):
-        """Allowed metrics values for Hubble."""
-        return
-
     @validator("metrics")
     def validate_metrics(cls, v):
         """Check that the values provided as metrics are in the allowed values.
