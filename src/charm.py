@@ -282,7 +282,7 @@ class CiliumCharm(CharmBase):
     def _remove_grafana_agent(self):
         objects = self._render_grafana_agent_manifests()
         for obj in objects:
-            self._client.delete(obj.kind, obj.metadata.name, namespace=obj.metadata.namespace)
+            self._client.delete(type(obj), obj.metadata.name, namespace=obj.metadata.namespace)
 
     def _render_grafana_agent_manifests(self, remote_endpoints=""):
         template_args = {

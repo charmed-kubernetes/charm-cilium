@@ -326,7 +326,6 @@ async def cos_lite_installed(ops_test, cos_lb_model):
 async def traefik_ingress(ops_test, cos_lb_model, cos_lite_installed):
     _, k8s_alias = cos_lb_model
     with ops_test.model_context(k8s_alias):
-
         address = await get_address(ops_test=ops_test, app_name="traefik")
         yield address
 

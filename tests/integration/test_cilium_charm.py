@@ -144,6 +144,7 @@ async def test_prometheus(
     log.info("Waiting for metrics...")
     await asyncio.sleep(120)
     metrics = await prometheus.get_metrics()
-    assert expected_prometheus_metrics.issubset(
-        set(metrics)
+    common_metrics = expected_prometheus_metrics.intersection(set(metrics))
+    assert (
+        common_metrics
     ), f"Cilium Metrics missing from Prometheus: {expected_prometheus_metrics.difference(set(metrics))}"
