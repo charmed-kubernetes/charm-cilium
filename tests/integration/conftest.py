@@ -24,7 +24,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--metallb-iprange",
         action="store",
-        default="10.246.153.240-10.246.153.242",
+        default="10.246.154.240-10.246.154.242",
         help="IP range to use in MetalLB",
     )
     parser.addoption(
