@@ -97,7 +97,7 @@ jobs:
         with:
           name: cilium.charm
       - name: Run test
-        run: tox -e integration
+        run: tox -e integration -- --basetemp=/home/ubuntu/pytest
       - name: Setup Debug Artifact Collection
         if: ${{ failure() }}
         run: mkdir tmp
