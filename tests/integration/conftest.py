@@ -250,7 +250,7 @@ async def metallb_installed(request, ops_test: OpsTest, metal_lb_model, metallb_
             rc, stdout, stderr = await ops_test.juju(*shlex.split(cmd))
             log.info(f"{(stdout or stderr)})")
             assert rc == 0
-            await m.block_until(lambda: {charm} not in m.applications, timeout=60 * 10)
+            await m.block_until(lambda: charm not in m.applications, timeout=60 * 10)
 
 
 @pytest.fixture(scope="module")
@@ -329,7 +329,7 @@ async def cos_lite_installed(ops_test, cos_lb_model):
             rc, stdout, stderr = await ops_test.juju(*shlex.split(cmd))
             log.info(f"{(stdout or stderr)})")
             assert rc == 0
-            await m.block_until(lambda: {charm} not in m.applications, timeout=60 * 10)
+            await m.block_until(lambda: charm not in m.applications, timeout=60 * 10)
 
 
 @pytest.fixture(scope="module")
@@ -372,6 +372,10 @@ async def related_grafana(ops_test, cos_lb_model):
     with ops_test.model_context("main") as model:
         log.info("Removing Grafana SAAS ...")
         await ops_test.model.remove_saas("grafana-dashboards")
+        await ops_test.model.wait_for_idle(status="active")
+    with ops_test.model_context(k8s_alias) as model:
+        log.info("Removing Grafana Offer...")
+        await ops_test.model.remove_offer("grafana-dashboard", force=True)
         await ops_test.model.wait_for_idle(status="active")
 
 
@@ -422,6 +426,12 @@ async def related_prometheus(ops_test, cos_lb_model):
         cilium_app = ops_test.model.applications["cilium"]
         metrics_config = {"enable-cilium-metrics": "false"}
         await cilium_app.set_config(metrics_config)
+
         log.info("Removing Prometheus Remote Write SAAS ...")
         await ops_test.model.remove_saas("prometheus-receive-remote-write")
+        await ops_test.model.wait_for_idle(status="active")
+
+    with ops_test.model_context(k8s_alias) as model:
+        log.info("Removing Prometheus Offer...")
+        await ops_test.model.remove_offer("receive-remote-write", force=True)
         await ops_test.model.wait_for_idle(status="active")
