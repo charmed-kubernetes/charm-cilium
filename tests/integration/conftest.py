@@ -301,7 +301,7 @@ async def cos_lb_model(k8s_cloud, ops_test, metallb_installed):
 @pytest.fixture(scope="module")
 async def cos_lite_installed(ops_test, cos_lb_model):
     log.info("Deploying COS bundle ...")
-    cos_charms = ["grafana", "traefik", "prometheus"]
+    cos_charms = ["alertmanager", "catalogue", "grafana", "loki", "prometheus", "traefik"]
     _, k8s_alias = cos_lb_model
     with ops_test.model_context(k8s_alias) as model:
         overlays = [ops_test.Bundle("cos-lite", "edge"), Path("tests/data/offers-overlay.yaml")]
@@ -320,6 +320,16 @@ async def cos_lite_installed(ops_test, cos_lb_model):
         await model.wait_for_idle(status="active", timeout=20 * 60, raise_on_error=False)
 
     yield
+
+    with ops_test.model_context(k8s_alias) as m:
+        log.info("Removing COS Lite charms...")
+        for charm in cos_charms:
+            log.info(f"Removing {charm}...")
+            cmd = f"remove-application {charm} --destroy-storage --force"
+            rc, stdout, stderr = await ops_test.juju(*shlex.split(cmd))
+            log.info(f"{(stdout or stderr)})")
+            assert rc == 0
+            await m.block_until(lambda: {charm} not in m.applications, timeout=60 * 10)
 
 
 @pytest.fixture(scope="module")
