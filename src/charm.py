@@ -12,20 +12,28 @@ from functools import cached_property
 from pathlib import Path
 from subprocess import check_output
 from tarfile import TarError
+from typing import List
 
+from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
+from charms.prometheus_k8s.v0.prometheus_remote_write import PrometheusRemoteWriteConsumer
 from httpx import ConnectError
+from jinja2 import Environment, FileSystemLoader
+from lightkube import Client, codecs
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
 from ops.manifests import Collector, ManifestClientError
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
+from pydantic import ValidationError
 
 from cilium_manifests import CiliumManifests
 from hubble_manifests import HubbleManifests
+from metrics_validator import HubbleMetrics
 
 log = logging.getLogger(__name__)
 
 CLI_CLIENTS_PATH = Path("/usr/local/bin")
+TEMPLATES_PATH = Path("./templates")
 PORT_FORWARD_SERVICE = "hubble-port-forward.service"
 RESOURCES = ["cilium", "hubble"]
 
@@ -37,18 +45,35 @@ class CiliumCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
+
         self.stored.set_default(
-            cilium_configured=False, hubble_configured=False, hubble_mismatch_config=False
+            cilium_configured=False,
+            hubble_configured=False,
+            hubble_mismatch_config=False,
+            unallowed_metrics=False,
         )
 
-        self.cilium_manifests = CiliumManifests(self, self.config)
+        self.hubble_metrics: List[str] = []
+        self.cilium_manifests = CiliumManifests(self, self.config, self.hubble_metrics)
         self.hubble_manifests = HubbleManifests(self, self.config)
         self.collector = Collector(self.cilium_manifests, self.hubble_manifests)
+
+        self.jinja2_env = Environment(loader=FileSystemLoader("templates/"))
+        self.grafana_dashboard_provider = GrafanaDashboardProvider(self)
+        self.remote_write_consumer = PrometheusRemoteWriteConsumer(self)
 
         self.framework.observe(self.on.install, self._on_install)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.cni_relation_changed, self._on_cni_relation_changed)
         self.framework.observe(self.on.cni_relation_joined, self._on_cni_relation_joined)
+        self.framework.observe(
+            self.remote_write_consumer.on.endpoints_changed,
+            self._on_remote_write_changed,
+        )
+        self.framework.observe(
+            self.on.send_remote_write_relation_departed,
+            self._on_remote_write_departed,
+        )
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
 
@@ -70,6 +95,12 @@ class CiliumCharm(CharmBase):
         elif not rc:
             self.unit.status = WaitingStatus(waiting_msg)
 
+    @cached_property
+    def _client(self) -> Client:
+        """Lightkube Client instance."""
+        client = Client(field_manager=f"{self.model.app.name}")
+        return client
+
     def _configure_cilium(self, event):
         self.stored.cilium_configured = False
 
@@ -77,8 +108,8 @@ class CiliumCharm(CharmBase):
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
 
         log.info("Applying Cilium manifests")
-        self._configure_cilium_cni(event)
         self._configure_hubble(event)
+        self._configure_cilium_cni(event)
 
         self.stored.cilium_configured = True
 
@@ -102,12 +133,19 @@ class CiliumCharm(CharmBase):
         if self.model.config["enable-hubble"]:
             try:
                 self.unit.status = MaintenanceStatus("Applying Hubble resources.")
+                self._configure_hubble_metrics()
                 self.hubble_manifests.apply_manifests()
                 self.stored.hubble_configured = True
             except (ManifestClientError, ConnectError):
                 return self._ops_wait_for(
                     event, "Waiting to retry Hubble configuration.", exc_info=True
                 )
+            except (ValidationError, ValueError):
+                msg = "Hubble Metrics should only contain valid metrics values."
+                self.unit.status = BlockedStatus(msg)
+                self.stored.unallowed_metrics = True
+                log.exception(msg)
+                return
 
         elif self.stored.hubble_configured:
             try:
@@ -116,6 +154,22 @@ class CiliumCharm(CharmBase):
                 self.stored.hubble_configured = False
             except (ManifestClientError, ConnectError):
                 return self._ops_wait_for(event, "Waiting to retry Hubble removal.", exc_info=True)
+
+    def _configure_hubble_metrics(self):
+        if values := self.model.config["enable-hubble-metrics"]:
+            try:
+                values = values.split()
+                valid_metrics = HubbleMetrics(metrics=values)
+                self.hubble_metrics.clear()
+                self.hubble_metrics.extend(valid_metrics.metrics)
+                self.stored.unallowed_metrics = False
+            except ValueError:
+                raise
+
+    def _deploy_grafana_agent(self, remote_endpoints):
+        objects = self._render_grafana_agent_manifests(remote_endpoints=remote_endpoints)
+        for obj in objects:
+            self._client.apply(obj)
 
     def _get_kubeconfig_status(self):
         for relation in self.model.relations["cni"]:
@@ -207,6 +261,14 @@ class CiliumCharm(CharmBase):
             else:
                 self.stored.hubble_mismatch_config = True
 
+    def _on_remote_write_changed(self, _):
+        if self.remote_write_consumer.endpoints and self.unit.is_leader():
+            self._deploy_grafana_agent(self.remote_write_consumer.endpoints)
+
+    def _on_remote_write_departed(self, _):
+        if self.unit.is_leader():
+            self._remove_grafana_agent()
+
     def _on_update_status(self, _):
         self._set_active_status()
 
@@ -221,12 +283,41 @@ class CiliumCharm(CharmBase):
         self.stored.cilium_configured = False
         self._install_cli_resources()
 
+    def _remove_grafana_agent(self):
+        objects = self._render_grafana_agent_manifests()
+        for obj in objects:
+            self._client.delete(type(obj), obj.metadata.name, namespace=obj.metadata.namespace)
+
+    def _render_grafana_agent_manifests(self, remote_endpoints=""):
+        template_args = {
+            "juju_model": self.model.name,
+            "juju_model_uuid": self.model.uuid,
+            "juju_app": self.model.app.name,
+            "namespace": "kube-system",
+            "remote_endpoints": remote_endpoints,
+        }
+        configmap = self._render_template("grafana-configmap.yaml", **template_args)
+        agent = self._render_template("grafana-agent.yaml", **template_args)
+        objects = list(codecs.load_all_yaml(configmap)) + list(codecs.load_all_yaml(agent))
+        return objects
+
+    def _render_template(self, filename, **kwargs):
+        template = self.jinja2_env.get_template(filename)
+        return template.render(**kwargs)
+
     def _set_active_status(self):
-        if self.stored.cilium_configured:
-            if self.model.config["enable-hubble"] and not self.stored.hubble_configured:
-                return
-            self.unit.status = ActiveStatus("Ready")
-            self.unit.set_workload_version(self.collector.short_version)
+        if not self.stored.cilium_configured:
+            return
+
+        if self.model.config.get("enable-hubble") and not self.stored.hubble_configured:
+            return
+
+        if self.stored.unallowed_metrics:
+            return
+
+        self.unit.status = ActiveStatus("Ready")
+        self.unit.set_workload_version(self.collector.short_version)
+
         self._check_port_forward_service()
 
     def _unpack_archive(self, path, filename):
