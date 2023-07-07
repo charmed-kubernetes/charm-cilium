@@ -304,3 +304,56 @@ def test_on_port_forward_hubble(mock_port_forward, input_data, expected_calls, c
 
     assert charm.stored.hubble_mismatch_config == input_data["mismatch"]
     mock_port_forward.assert_has_calls(expected_calls)
+
+
+@mock.patch("charm.CiliumCharm._handle_grafana_agent")
+def test_on_remote_write_changed(mock_handle, charm, harness):
+    with mock.patch.object(charm, "remote_write_consumer") as mock_endpoints:
+        harness.set_leader(True)
+        mock_endpoints.endpoints = ["192.168.3.17", "192.168.3.21"]
+        mock_event = mock.MagicMock()
+        charm._on_remote_write_changed(mock_event)
+
+        mock_handle.assert_called_once_with(
+            mock_event,
+            "Applying",
+            "apply",
+            charm._deploy_grafana_agent,
+            context=charm.remote_write_consumer.endpoints,
+        )
+
+
+@mock.patch("charm.CiliumCharm._handle_grafana_agent")
+def test_on_remote_write_departed(mock_handle, charm, harness):
+    harness.set_leader(True)
+    mock_event = mock.MagicMock()
+    charm._on_remote_write_departed(mock_event)
+
+    mock_handle.assert_called_once_with(
+        mock_event,
+        "Removing",
+        "remove",
+        charm._remove_grafana_agent,
+    )
+
+
+@mock.patch("charm.CiliumCharm._set_active_status")
+@mock.patch("charm.CiliumCharm._get_kubeconfig_status", return_value=True)
+def test_handle_grafana_agent(mock_get, mock_set_status, charm, harness):
+    harness.set_leader(True)
+    mock_event = mock.MagicMock()
+    mock_operation = mock.MagicMock()
+    charm._handle_grafana_agent(mock_event, "verb", "noun", mock_operation)
+    mock_operation.assert_called_once()
+    mock_set_status.assert_called_once()
+
+
+@mock.patch("charm.CiliumCharm._set_active_status")
+@mock.patch("charm.CiliumCharm._get_kubeconfig_status", return_value=True)
+def test_handle_grafana_agent_fails(mock_get, mock_set_status, charm, harness, api_error_klass):
+    harness.set_leader(True)
+    mock_event = mock.MagicMock()
+    mock_operation = mock.MagicMock(side_effect=api_error_klass)
+    charm._handle_grafana_agent(mock_event, "verb", "noun", mock_operation)
+
+    mock_event.defer.assert_called_once()
