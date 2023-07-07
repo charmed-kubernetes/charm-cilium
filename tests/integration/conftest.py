@@ -280,7 +280,7 @@ async def cos_lb_model(k8s_cloud, ops_test, metallb_installed):
 
     yield model, model_alias
 
-    timeout = 5 * 60
+    timeout = 10 * 60
     await ops_test.forget_model(model_alias, timeout=timeout, allow_failure=False)
 
     async def model_removed():
