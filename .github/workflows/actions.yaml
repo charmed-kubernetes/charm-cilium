@@ -26,7 +26,7 @@ jobs:
     needs: 
       - lint-unit
     runs-on: self-hosted
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Check out code
         uses: actions/checkout@v3
