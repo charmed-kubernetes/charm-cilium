@@ -16,9 +16,10 @@ from typing import List
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import PrometheusRemoteWriteConsumer
-from httpx import ConnectError
+from httpx import ConnectError, HTTPError
 from jinja2 import Environment, FileSystemLoader
 from lightkube import Client, codecs
+from lightkube.core.exceptions import ApiError
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
@@ -184,7 +185,7 @@ class CiliumCharm(CharmBase):
                 yield tarinfo
 
     def _get_service_status(self, service_name):
-        """Checks if service is active, returns 0 on success, otherwise non-zero value."""
+        """Check if service is active, returns 0 on success, otherwise non-zero value."""
         return subprocess.call(["systemctl", "is-active", service_name])
 
     def _install_cli_resources(self):
@@ -261,13 +262,36 @@ class CiliumCharm(CharmBase):
             else:
                 self.stored.hubble_mismatch_config = True
 
-    def _on_remote_write_changed(self, _):
-        if self.remote_write_consumer.endpoints and self.unit.is_leader():
-            self._deploy_grafana_agent(self.remote_write_consumer.endpoints)
+    def _on_remote_write_changed(self, event):
+        if self.remote_write_consumer.endpoints:
+            self._handle_grafana_agent(
+                event,
+                "Applying",
+                "apply",
+                self._deploy_grafana_agent,
+                context=self.remote_write_consumer.endpoints,
+            )
 
-    def _on_remote_write_departed(self, _):
-        if self.unit.is_leader():
-            self._remove_grafana_agent()
+    def _on_remote_write_departed(self, event):
+        self._handle_grafana_agent(event, "Removing", "remove", self._remove_grafana_agent)
+
+    def _handle_grafana_agent(self, event, action_verb, action_noun, operation, context=None):
+        if not self.unit.is_leader():
+            return
+        self.unit.status = MaintenanceStatus(f"{action_verb} Grafana Agent")
+
+        if not self._get_kubeconfig_status():
+            self.unit.status = WaitingStatus("Waiting for Kubernetes API")
+            log.info(f"Unable to {action_noun} Grafana Agent manifest, will retry.")
+            event.defer()
+            return
+        try:
+            operation(*(context,) if context else ())
+            self._set_active_status()
+        except (ApiError, HTTPError):
+            log.exception(f"Failed to {action_noun} Grafana Agent resources, will retry.")
+            event.defer()
+            return
 
     def _on_update_status(self, _):
         self._set_active_status()
