@@ -374,7 +374,7 @@ async def related_grafana(ops_test, cos_lb_model, cos_lite_installed):
         await ops_test.model.wait_for_idle(status="active")
     with ops_test.model_context(k8s_alias) as model:
         log.info("Removing Grafana Offer...")
-        await model.remove_offer("grafana-dashboards", force=True)
+        await model.remove_offer(f"{model.name}.grafana-dashboards", force=True)
         await model.wait_for_idle(status="active")
 
 
@@ -397,7 +397,7 @@ async def expected_prometheus_metrics():
 
 
 @pytest.fixture(scope="module")
-async def related_prometheus(ops_test, cos_lb_model, cos_lite_installed):
+async def related_prometheus(ops_test: OpsTest, cos_lb_model, cos_lite_installed):
     cos_model, k8s_alias = cos_lb_model
     model_owner = untag("user-", cos_model.info.owner_tag)
     cos_model_name = cos_model.name
@@ -431,5 +431,5 @@ async def related_prometheus(ops_test, cos_lb_model, cos_lite_installed):
 
     with ops_test.model_context(k8s_alias) as model:
         log.info("Removing Prometheus Offer...")
-        await model.remove_offer("prometheus-receive-remote-write", force=True)
+        await model.remove_offer(f"{model.name}.prometheus-receive-remote-write", force=True)
         await model.wait_for_idle(status="active")
