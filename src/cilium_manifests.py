@@ -1,7 +1,9 @@
 """Implementation of Cilium Manifests manager."""
 
+import hashlib
+import json
 import logging
-from typing import Dict
+from typing import Dict, Optional
 
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
 
@@ -95,6 +97,30 @@ class PatchPrometheusConfigMap(Patch):
         data.update(values)
 
 
+class PatchCDKOnRelationChange(Patch):
+    """Patch Deployments/Daemonsets to be apart of cdk-restart-on-ca-change.
+
+    * adding the config hash as an annotation
+    * adding a cdk restart label
+    """
+
+    def __call__(self, obj) -> None:
+        """Modify the cilium-operator Deployment and cilium DaemonSet."""
+        if obj.kind not in ["Deployment", "DaemonSet"]:
+            return
+
+        title = f"{obj.kind}/{obj.metadata.name.title().replace('-', ' ')}"
+        log.info(f"Patching {title} cdk-restart-on-ca-changed label.")
+        label = {"cdk-restart-on-ca-change": "true"}
+        obj.metadata.labels = obj.metadata.labels or {}
+        obj.metadata.labels.update(label)
+
+        log.info(f"Adding hash to {title}.")
+        obj.spec.template.metadata.annotations = {
+            "juju.is/manifest-hash": self.manifests.config_hash
+        }
+
+
 class SetIPv4CIDR(Patch):
     """Configure IPv4 CIDR and Node Mask."""
 
@@ -111,10 +137,12 @@ class SetIPv4CIDR(Patch):
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
 
-    def __init__(self, charm, charm_config, hubble_metrics):
+    def __init__(self, charm, charm_config, hubble_metrics, service_cidr: Optional[str] = None):
+        self.service_cidr = service_cidr
         manipulations = [
             ConfigRegistry(self),
             ManifestLabel(self),
+            PatchCDKOnRelationChange(self),
             PatchCiliumDaemonSetAnnotations(self),
             PatchCiliumOperatorAnnotations(self),
             PatchPrometheusConfigMap(self),
@@ -130,6 +158,7 @@ class CiliumManifests(Manifests):
     def config(self) -> Dict:
         """Returns config mapped from charm config and joined relations."""
         config = dict(**self.charm_config)
+        config["service-cidr"] = self.service_cidr
 
         for key, value in dict(**config).items():
             if value == "" or value is None:
@@ -137,3 +166,10 @@ class CiliumManifests(Manifests):
 
         config["release"] = config.pop("release", None)
         return config
+
+    @property
+    def config_hash(self) -> str:
+        json_str = json.dumps(self.config, sort_keys=True)
+        hash = hashlib.sha256()
+        hash.update(json_str.encode())
+        return hash.hexdigest()

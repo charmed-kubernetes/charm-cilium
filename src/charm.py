@@ -15,7 +15,8 @@ from tarfile import TarError
 from typing import List
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
-from charms.prometheus_k8s.v0.prometheus_remote_write import PrometheusRemoteWriteConsumer
+from charms.prometheus_k8s.v0.prometheus_remote_write import \
+    PrometheusRemoteWriteConsumer
 from httpx import ConnectError, HTTPError
 from jinja2 import Environment, FileSystemLoader
 from lightkube import Client, codecs
@@ -24,7 +25,8 @@ from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
 from ops.manifests import Collector, ManifestClientError
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
+from ops.model import (ActiveStatus, BlockedStatus, MaintenanceStatus,
+                       ModelError, WaitingStatus)
 from pydantic import ValidationError
 
 from cilium_manifests import CiliumManifests
@@ -117,6 +119,7 @@ class CiliumCharm(CharmBase):
     def _configure_cilium_cni(self, event):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
+            self.cilium_manifests.service_cidr = self._get_service_cidr()
             self.cilium_manifests.apply_manifests()
         except (ManifestClientError, ConnectError):
             return self._ops_wait_for(
@@ -187,6 +190,12 @@ class CiliumCharm(CharmBase):
     def _get_service_status(self, service_name):
         """Check if service is active, returns 0 on success, otherwise non-zero value."""
         return subprocess.call(["systemctl", "is-active", service_name])
+
+    def _get_service_cidr(self):
+        for relation in self.model.relations["cni"]:
+            for unit in relation.units:
+                if cidr := relation.data[unit].get("service-cidr"):
+                    return cidr
 
     def _install_cli_resources(self):
         self._manage_port_forward_service()
