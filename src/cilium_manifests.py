@@ -169,6 +169,11 @@ class CiliumManifests(Manifests):
 
     @property
     def config_hash(self) -> str:
+        """Return the configuration SHA256 hash from the charm config.
+
+        Returns:
+            str: The SHA256 hash
+        """
         json_str = json.dumps(self.config, sort_keys=True)
         hash = hashlib.sha256()
         hash.update(json_str.encode())
