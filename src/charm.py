@@ -117,6 +117,7 @@ class CiliumCharm(CharmBase):
     def _configure_cilium_cni(self, event):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
+            self.cilium_manifests.service_cidr = self._get_service_cidr()
             self.cilium_manifests.apply_manifests()
         except (ManifestClientError, ConnectError):
             return self._ops_wait_for(
@@ -187,6 +188,12 @@ class CiliumCharm(CharmBase):
     def _get_service_status(self, service_name):
         """Check if service is active, returns 0 on success, otherwise non-zero value."""
         return subprocess.call(["systemctl", "is-active", service_name])
+
+    def _get_service_cidr(self):
+        for relation in self.model.relations["cni"]:
+            for unit in relation.units:
+                if cidr := relation.data[unit].get("service-cidr"):
+                    return cidr
 
     def _install_cli_resources(self):
         self._manage_port_forward_service()
