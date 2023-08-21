@@ -75,8 +75,37 @@ class CiliumCharm(CharmBase):
             self.on.send_remote_write_relation_departed,
             self._on_remote_write_departed,
         )
+
+        self.framework.observe(self.on.list_versions_action, self._list_versions)
+        self.framework.observe(self.on.list_resources_action, self._list_resources)
+        self.framework.observe(self.on.scrub_resources_action, self._scrub_resources)
+        self.framework.observe(self.on.sync_resources_action, self._sync_resources)
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
+
+    def _list_versions(self, event):
+        self.collector.list_versions(event)
+
+    def _list_resources(self, event):
+        manifests = event.params.get("controller", "")
+        resources = event.params.get("resources", "")
+        return self.collector.list_resources(event, manifests, resources)
+
+    def _scrub_resources(self, event):
+        manifests = event.params.get("controller", "")
+        resources = event.params.get("resources", "")
+        return self.collector.scrub_resources(event, manifests, resources)
+
+    def _sync_resources(self, event):
+        manifests = event.params.get("controller", "")
+        resources = event.params.get("resources", "")
+        try:
+            self.collector.apply_missing_resources(event, manifests, resources)
+        except ManifestClientError:
+            msg = "Failed to apply missing resources. API Server unavailable."
+            event.set_results({"result": msg})
+        else:
+            self.stored.deployed = True
 
     @cached_property
     def _arch(self):
