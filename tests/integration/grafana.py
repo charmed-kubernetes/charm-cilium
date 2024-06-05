@@ -13,7 +13,7 @@ class Grafana:
         username: Optional[str] = "admin",
         password: Optional[str] = "",
     ):
-        """Utility to manage a Grafana application.
+        """Manage a Grafana application.
 
         Args:
             ops_test: Default instance of ops_test.
@@ -22,7 +22,7 @@ class Grafana:
             password: Optional password to connect with, defaults to `""`.
         """
         self.ops_test = ops_test
-        self.base_uri = "http://{}/cos-grafana".format(host)
+        self.base_uri = f"http://{host}/cos-grafana"
         self.username = username
         self.password = password
 
@@ -36,13 +36,13 @@ class Grafana:
         return res.get("database", "") == "ok" or False
 
     async def health(self) -> dict:
-        """A convenience method which queries the API to see whether Grafana is really ready.
+        """Query the API to see whether Grafana is really ready.
 
         Returns:
             Empty :dict: if it is not up, otherwise a dict containing basic API health
         """
         api_path = "api/health"
-        uri = "{}/{}".format(self.base_uri, api_path)
+        uri = f"{self.base_uri}/{api_path}"
 
         response = requests.get(uri, auth=(self.username, self.password))
 
@@ -56,7 +56,7 @@ class Grafana:
           Found dashboards, if any
         """
         api_path = "api/search"
-        uri = "{}/{}?starred=false".format(self.base_uri, api_path)
+        uri = f"{self.base_uri}/{api_path}?starred=false"
 
         response = requests.get(uri, auth=(self.username, self.password))
 
