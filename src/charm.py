@@ -15,21 +15,28 @@ from tarfile import TarError
 from typing import List
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
-from charms.prometheus_k8s.v0.prometheus_remote_write import PrometheusRemoteWriteConsumer
+from charms.prometheus_k8s.v0.prometheus_remote_write import (
+    PrometheusRemoteWriteConsumer,
+)
+from cilium_manifests import CiliumManifests
 from httpx import ConnectError, HTTPError
+from hubble_manifests import HubbleManifests
 from jinja2 import Environment, FileSystemLoader
 from lightkube import Client, codecs
 from lightkube.core.exceptions import ApiError
+from metrics_validator import HubbleMetrics
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
 from ops.manifests import Collector, ManifestClientError
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
+from ops.model import (
+    ActiveStatus,
+    BlockedStatus,
+    MaintenanceStatus,
+    ModelError,
+    WaitingStatus,
+)
 from pydantic import ValidationError
-
-from cilium_manifests import CiliumManifests
-from hubble_manifests import HubbleManifests
-from metrics_validator import HubbleMetrics
 
 log = logging.getLogger(__name__)
 
@@ -209,7 +216,7 @@ class CiliumCharm(CharmBase):
             self.unit.status = BlockedStatus("Unable to claim the CLI resources.")
             log.error(e)
             return
-        except NameError as e:
+        except (FileNotFoundError, NameError) as e:
             self.unit.status = BlockedStatus("CLI resources missing.")
             log.error(e)
             return
