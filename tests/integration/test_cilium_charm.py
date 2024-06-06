@@ -9,12 +9,13 @@ import shlex
 from pathlib import Path
 
 import pytest
+from grafana import Grafana
+from prometheus import Prometheus
 from pytest_operator.plugin import OpsTest
 
-from tests.integration.grafana import Grafana
-from tests.integration.prometheus import Prometheus
-
 log = logging.getLogger(__name__)
+TEN_MINUTES = 10 * 60
+ONE_HOUR = 60 * 60
 
 
 @pytest.mark.abort_on_fail
@@ -61,7 +62,7 @@ async def test_build_and_deploy(ops_test: OpsTest):
     assert rc == 0, f"Bundle deploy failed: {(stderr or stdout).strip()}"
 
     await ops_test.model.block_until(lambda: "cilium" in ops_test.model.applications, timeout=60)
-    await ops_test.model.wait_for_idle(status="active", timeout=60 * 60)
+    await ops_test.model.wait_for_idle(status="active", timeout=ONE_HOUR)
 
 
 async def test_cli_resources(ops_test: OpsTest):
@@ -82,13 +83,15 @@ async def active_hubble(ops_test, hubble_test_resources):
     log.info("Enabling Hubble...")
     cilium_app = ops_test.model.applications["cilium"]
     await cilium_app.set_config({"enable-hubble": "true", "port-forward-hubble": "true"})
-    await ops_test.model.wait_for_idle(status="active", timeout=5 * 60)
+    async with ops_test.fast_forward("30s"):
+        await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
 
     yield
 
     log.info("Removing Hubble and port-forward service...")
     await cilium_app.set_config({"enable-hubble": "false", "port-forward-hubble": "false"})
-    await ops_test.model.wait_for_idle(status="active", timeout=5 * 60)
+    async with ops_test.fast_forward("30s"):
+        await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
 
 
 async def test_hubble(ops_test, active_hubble, kubectl_exec):
@@ -144,7 +147,6 @@ async def test_prometheus(
     log.info("Waiting for metrics...")
     await asyncio.sleep(120)
     metrics = await prometheus.get_metrics()
-    common_metrics = expected_prometheus_metrics.intersection(set(metrics))
-    assert (
-        common_metrics
+    assert expected_prometheus_metrics.issubset(
+        set(metrics)
     ), f"Cilium Metrics missing from Prometheus: {expected_prometheus_metrics.difference(set(metrics))}"

@@ -3,10 +3,9 @@ import unittest.mock as mock
 
 import ops.testing
 import pytest
+from charm import CiliumCharm
 from lightkube.core.exceptions import ApiError
 from ops.testing import Harness
-
-from charm import CiliumCharm
 
 ops.testing.SIMULATE_CAN_CONNECT = True
 

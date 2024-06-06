@@ -120,7 +120,10 @@ def test_configure_cni_relation(harness, charm):
 
 @pytest.mark.parametrize(
     "enable_hubble,hubble_configured",
-    [pytest.param(True, False, id="Enable Hubble"), pytest.param(False, True, id="Remove Hubble")],
+    [
+        pytest.param(True, False, id="Enable Hubble"),
+        pytest.param(False, True, id="Remove Hubble"),
+    ],
 )
 def test_configure_hubble(charm, harness, enable_hubble, hubble_configured):
     with mock.patch.object(charm.hubble_manifests, "apply_manifests") as mock_apply:
@@ -138,7 +141,10 @@ def test_configure_hubble(charm, harness, enable_hubble, hubble_configured):
 
 @pytest.mark.parametrize(
     "enable_hubble,hubble_configured",
-    [pytest.param(True, False, id="Enable Hubble"), pytest.param(False, True, id="Remove Hubble")],
+    [
+        pytest.param(True, False, id="Enable Hubble"),
+        pytest.param(False, True, id="Remove Hubble"),
+    ],
 )
 def test_configure_hubble_exception(charm, harness, enable_hubble, hubble_configured):
     with mock.patch.object(charm.hubble_manifests, "apply_manifests") as mock_apply:
@@ -193,7 +199,9 @@ def test_get_service_status(charm):
 @mock.patch("charm.CiliumCharm._unpack_archive")
 def test_install_cli_resources(mock_unpack, charm, harness):
     with mock.patch.object(
-        charm.model.resources, "fetch", lambda rsc: str(tempfile.NamedTemporaryFile().name)
+        charm.model.resources,
+        "fetch",
+        lambda rsc: str(tempfile.NamedTemporaryFile().name),
     ):
         charm._install_cli_resources()
         assert mock_unpack.call_count == 2
@@ -204,7 +212,9 @@ def test_install_cli_resources(mock_unpack, charm, harness):
     "side_effect,expected_status",
     [
         pytest.param(
-            ModelError(), BlockedStatus("Unable to claim the CLI resources."), id="Model Error"
+            ModelError(),
+            BlockedStatus("Unable to claim the CLI resources."),
+            id="Model Error",
         ),
         pytest.param(NameError(), BlockedStatus("CLI resources missing."), id="Name Error"),
         pytest.param(
@@ -213,7 +223,9 @@ def test_install_cli_resources(mock_unpack, charm, harness):
             id="Permission Error",
         ),
         pytest.param(
-            TarError(), BlockedStatus("Error unpacking CLI binaries."), id="TarFile Error"
+            TarError(),
+            BlockedStatus("Error unpacking CLI binaries."),
+            id="TarFile Error",
         ),
     ],
 )

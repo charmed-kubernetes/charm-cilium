@@ -1,16 +1,14 @@
-import asyncio
 import json
 import logging
-import os
 import shlex
 from pathlib import Path
 from typing import Tuple, Union
 
-import juju.utils
 import pytest
-import yaml
 from helpers import get_address
 from juju.tag import untag
+from kubernetes import config as k8s_config
+from kubernetes.client import Configuration
 from lightkube import AsyncClient, codecs
 from lightkube.config.kubeconfig import KubeConfig
 from lightkube.generic_resource import create_namespaced_resource
@@ -18,6 +16,7 @@ from lightkube.resources.core_v1 import Pod
 from pytest_operator.plugin import OpsTest
 
 log = logging.getLogger(__name__)
+KubeCtl = Union[str, Tuple[int, str, str]]
 
 
 def pytest_addoption(parser):
@@ -30,7 +29,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--k8s-cloud",
         action="store",
-        default="",
+        default=None,
         help="Juju kubernetes cloud to reuse; if not provided, will generate a new cloud",
     )
 
@@ -103,7 +102,6 @@ async def hubble_test_resources(kubernetes, cilium_np_resource):
 @pytest.fixture(scope="module")
 def kubectl(ops_test, kubeconfig):
     """Supports running kubectl exec commands."""
-    KubeCtl = Union[str, Tuple[int, str, str]]
 
     async def f(*args, **kwargs) -> KubeCtl:
         """Actual callable returned by the fixture.
@@ -131,213 +129,119 @@ def kubectl_exec(kubectl):
 
 
 @pytest.fixture(scope="module")
-async def metallb_rbac(kubectl):
-    log.info("Applying MetalLB RBAC...")
-    await kubectl("apply", "-f", "tests/data/rbac-permissions-operators.yaml")
+async def k8s_cloud(request, kubeconfig, ops_test: OpsTest):
+    cloud_name = request.config.getoption("--k8s-cloud")
+    config = type.__call__(Configuration)
+    k8s_config.load_config(client_configuration=config, config_file=str(kubeconfig))
+    k8s_cloud = await ops_test.add_k8s(
+        cloud_name=cloud_name, kubeconfig=config, skip_storage=False
+    )
+    yield k8s_cloud
 
 
 @pytest.fixture(scope="module")
-async def k8s_cloud(request, kubeconfig, module_name, ops_test: OpsTest):
-    cloud_name = request.config.getoption("--k8s-cloud") or f"{module_name}-k8s-cloud"
-    controller = await ops_test.model.get_controller()
-    try:
-        current_clouds = await controller.clouds()
-        if f"cloud-{cloud_name}" in current_clouds.clouds:
-            yield cloud_name
-            return
-    finally:
-        await controller.disconnect()
-
-    with ops_test.model_context("main"):
-        log.info(f"Adding cloud '{cloud_name}'...")
-        os.environ["KUBECONFIG"] = str(kubeconfig)
-        await ops_test.juju(
-            "add-k8s",
-            cloud_name,
-            f"--controller={ops_test.controller_name}",
-            "--client",
-            check=True,
-            fail_msg=f"Failed to add-k8s {cloud_name}",
-        )
-    yield cloud_name
-
-    with ops_test.model_context("main"):
-        log.info(f"Removing cloud '{cloud_name}'...")
-        await ops_test.juju(
-            "remove-cloud",
-            cloud_name,
-            "--controller",
-            ops_test.controller_name,
-            "--client",
-            check=True,
-        )
-
-
-@pytest.fixture(scope="module")
-async def metal_lb_model(k8s_cloud, ops_test: OpsTest):
-    model_alias = "metallb-model"
+async def metallb_model(k8s_cloud, ops_test: OpsTest):
     log.info("Creating MetalLB model ...")
 
+    model_alias = "metallb-model"
     model_name = "metallb-system"
-    await ops_test.juju(
-        "add-model",
-        f"--controller={ops_test.controller_name}",
-        model_name,
-        k8s_cloud,
-        "--no-switch",
-    )
-
     model = await ops_test.track_model(
         model_alias,
         model_name=model_name,
         cloud_name=k8s_cloud,
-        credential_name=k8s_cloud,
-        keep=False,
+        keep=ops_test.ModelKeep.NEVER,
     )
-    model_uuid = model.info.uuid
 
-    yield model, model_alias
-
-    timeout = 5 * 60
-    await ops_test.forget_model(model_alias, timeout=timeout, allow_failure=False)
-
-    async def model_removed():
-        _, stdout, stderr = await ops_test.juju("models", "--format", "yaml")
-        if _ != 0:
-            return False
-        model_list = yaml.safe_load(stdout)["models"]
-        which = [m for m in model_list if m["model-uuid"] == model_uuid]
-        return len(which) == 0
+    yield model
 
     log.info("Removing MetalLB model")
-    await juju.utils.block_until_with_coroutine(model_removed, timeout=timeout)
-    # Update client's model cache
-    await ops_test.juju("models")
+    await ops_test.forget_model(model_alias, timeout=5 * 60, allow_failure=False)
     log.info("MetalLB model removed ...")
 
 
 @pytest.fixture(scope="module")
-async def metallb_installed(request, ops_test: OpsTest, metal_lb_model, metallb_rbac):
+async def metallb_installed(request, metallb_model):
     ip_range = request.config.getoption("--metallb-iprange")
     log.info(f"Deploying MetalLB with IP range: {ip_range} ...")
 
-    metallb_charms = ["metallb-speaker", "metallb-controller"]
-    _, k8s_alias = metal_lb_model
-    with ops_test.model_context(k8s_alias) as model:
-        await asyncio.gather(
-            model.deploy(entity_url="metallb-speaker", trust=True, channel="edge"),
-            model.deploy(entity_url="metallb-controller", trust=True, channel="edge"),
-        )
-
-        await model.block_until(
-            lambda: all(app in model.applications for app in metallb_charms),
-            timeout=60,
-        )
-        await model.wait_for_idle(status="active", timeout=5 * 60)
-
-        metal_controller_app = model.applications["metallb-controller"]
-        await metal_controller_app.set_config({"iprange": ip_range})
-
-        await ops_test.model.wait_for_idle(status="active", timeout=5 * 60)
+    m = metallb_model
+    charm = "metallb"
+    await m.deploy(entity_url=charm, trust=True, channel="stable", config={"iprange": ip_range})
+    await m.block_until(lambda: charm in m.applications, timeout=60)
+    await m.wait_for_idle(status="active", timeout=5 * 60)
 
     yield
 
-    with ops_test.model_context(k8s_alias) as m:
-        log.info("Removing MetalLB charms...")
-        for charm in metallb_charms:
-            log.info(f"Removing {charm}...")
-            cmd = f"remove-application {charm} --destroy-storage --force"
-            rc, stdout, stderr = await ops_test.juju(*shlex.split(cmd))
-            log.info(f"{(stdout or stderr)})")
-            assert rc == 0
-            await m.block_until(lambda: charm not in m.applications, timeout=60 * 10)
+    log.info("Removing MetalLB charm...")
+    await m.remove_application(charm, force=True, destroy_storage=True)
+    await m.block_until(lambda: charm not in m.applications, timeout=60 * 10)
 
 
 @pytest.fixture(scope="module")
-async def cos_lb_model(k8s_cloud, ops_test, metallb_installed):
-    model_alias = "cos-model"
+async def cos_model(k8s_cloud, ops_test, metallb_installed):
     log.info("Creating COS model ...")
 
+    model_alias = "cos-model"
     model_name = "cos"
-    await ops_test.juju(
-        "add-model",
-        f"--controller={ops_test.controller_name}",
-        "--config",
-        "controller-service-type=loadbalancer",
-        model_name,
-        k8s_cloud,
-        "--no-switch",
-    )
-
     model = await ops_test.track_model(
         model_alias,
         model_name=model_name,
         cloud_name=k8s_cloud,
-        credential_name=k8s_cloud,
-        keep=False,
+        keep=ops_test.ModelKeep.NEVER,
+        config={"controller-service-type": "loadbalancer"},
     )
-    model_uuid = model.info.uuid
 
-    yield model, model_alias
-
-    timeout = 10 * 60
-    await ops_test.forget_model(model_alias, timeout=timeout, allow_failure=False)
-
-    async def model_removed():
-        _, stdout, stderr = await ops_test.juju("models", "--format", "yaml")
-        if _ != 0:
-            return False
-        model_list = yaml.safe_load(stdout)["models"]
-        which = [m for m in model_list if m["model-uuid"] == model_uuid]
-        return len(which) == 0
+    yield model
 
     log.info("Removing COS model ...")
-    await juju.utils.block_until_with_coroutine(model_removed, timeout=timeout)
-    # Update client's model cache
-    await ops_test.juju("models")
+    await ops_test.forget_model(model_alias, timeout=10 * 60, allow_failure=False)
     log.info("COS Model removed ...")
 
 
 @pytest.fixture(scope="module")
-async def cos_lite_installed(ops_test, cos_lb_model):
+async def cos_lite_installed(ops_test, cos_model):
     log.info("Deploying COS bundle ...")
-    cos_charms = ["alertmanager", "catalogue", "grafana", "loki", "prometheus", "traefik"]
-    _, k8s_alias = cos_lb_model
-    with ops_test.model_context(k8s_alias) as model:
-        overlays = [ops_test.Bundle("cos-lite", "edge"), Path("tests/data/offers-overlay.yaml")]
+    cos_charms = [
+        "alertmanager",
+        "catalogue",
+        "grafana",
+        "loki",
+        "prometheus",
+        "traefik",
+    ]
+    model = cos_model
+    overlays = [
+        ops_test.Bundle("cos-lite", "edge"),
+        Path("tests/data/offers-overlay.yaml"),
+    ]
+    bundle, *overlays = await ops_test.async_render_bundles(*overlays)
+    cmd = f"juju deploy -m {model.name} {bundle} --trust " + " ".join(
+        f"--overlay={f}" for f in overlays
+    )
+    rc, stdout, stderr = await ops_test.run(*shlex.split(cmd))
+    assert rc == 0, f"COS Lite failed to deploy: {(stderr or stdout).strip()}"
 
-        bundle, *overlays = await ops_test.async_render_bundles(*overlays)
-        cmd = f"juju deploy -m {model.name} {bundle} --trust " + " ".join(
-            f"--overlay={f}" for f in overlays
-        )
-        rc, stdout, stderr = await ops_test.run(*shlex.split(cmd))
-        assert rc == 0, f"COS Lite failed to deploy: {(stderr or stdout).strip()}"
-
-        await model.block_until(
-            lambda: all(app in model.applications for app in cos_charms),
-            timeout=60,
-        )
-        await model.wait_for_idle(status="active", timeout=20 * 60, raise_on_error=False)
+    await model.block_until(
+        lambda: all(app in model.applications for app in cos_charms),
+        timeout=60,
+    )
+    await model.wait_for_idle(status="active", timeout=20 * 60, raise_on_error=False)
 
     yield
 
-    with ops_test.model_context(k8s_alias) as m:
-        log.info("Removing COS Lite charms...")
-        for charm in cos_charms:
-            log.info(f"Removing {charm}...")
-            cmd = f"remove-application {charm} --destroy-storage --force"
-            rc, stdout, stderr = await ops_test.juju(*shlex.split(cmd))
-            log.info(f"{(stdout or stderr)})")
-            assert rc == 0
-            await m.block_until(lambda: charm not in m.applications, timeout=60 * 10)
+    log.info("Removing COS Lite charms...")
+    for charm in cos_charms:
+        log.info(f"Removing {charm}...")
+        await model.remove_application(charm, force=True, destroy_storage=True)
+    await model.block_until(
+        lambda: all(app not in model.applications for app in cos_charms),
+        timeout=60 * 10,
+    )
 
 
 @pytest.fixture(scope="module")
-async def traefik_ingress(ops_test, cos_lb_model, cos_lite_installed):
-    _, k8s_alias = cos_lb_model
-    with ops_test.model_context(k8s_alias):
-        address = await get_address(ops_test=ops_test, app_name="traefik")
-        yield address
+async def traefik_ingress(cos_model, cos_lite_installed):
+    yield await get_address(model=cos_model, app_name="traefik")
 
 
 @pytest.fixture(scope="module")
@@ -352,41 +256,36 @@ async def expected_dashboard_titles():
 
 
 @pytest.fixture(scope="module")
-async def related_grafana(ops_test, cos_lb_model, cos_lite_installed):
-    cos_model, k8s_alias = cos_lb_model
+async def related_grafana(ops_test, cos_model, cos_lite_installed):
     model_owner = untag("user-", cos_model.info.owner_tag)
     cos_model_name = cos_model.name
 
-    with ops_test.model_context("main") as model:
+    with ops_test.model_context("main") as k8s_model:
         log.info("Integrating Grafana and Cilium...")
-        await ops_test.model.integrate(
-            "cilium:grafana-dashboard", f"{model_owner}/{cos_model_name}.grafana-dashboards"
+        await k8s_model.integrate(
+            "cilium:grafana-dashboard",
+            f"{model_owner}/{cos_model_name}.grafana-dashboards",
         )
-        with ops_test.model_context(k8s_alias) as model:
-            await model.wait_for_idle(status="active")
-        await ops_test.model.wait_for_idle(status="active")
+        await cos_model.wait_for_idle(status="active")
+        await k8s_model.wait_for_idle(status="active")
 
     yield
 
-    with ops_test.model_context("main") as model:
+    with ops_test.model_context("main") as k8s_model:
         log.info("Removing Grafana SAAS ...")
-        await ops_test.model.remove_saas("grafana-dashboards")
-        await ops_test.model.wait_for_idle(status="active")
-    with ops_test.model_context(k8s_alias) as model:
+        await k8s_model.remove_saas("grafana-dashboards")
+        await k8s_model.wait_for_idle(status="active")
+
         log.info("Removing Grafana Offer...")
-        await model.remove_offer(f"{model.name}.grafana-dashboards", force=True)
-        await model.wait_for_idle(status="active")
+        await cos_model.remove_offer(f"{cos_model_name}.grafana-dashboards", force=True)
+        await cos_model.wait_for_idle(status="active")
 
 
 @pytest.fixture(scope="module")
-async def grafana_password(ops_test, related_grafana, cos_lb_model):
-    _, k8s_alias = cos_lb_model
-    with ops_test.model_context(k8s_alias):
-        action = (
-            await ops_test.model.applications["grafana"].units[0].run_action("get-admin-password")
-        )
-        action = await action.wait()
-    return action.results["admin-password"]
+async def grafana_password(ops_test, related_grafana, cos_model):
+    action = await cos_model.applications["grafana"].units[0].run_action("get-admin-password")
+    action = await action.wait()
+    yield action.results["admin-password"]
 
 
 @pytest.fixture(scope="module")
@@ -397,39 +296,38 @@ async def expected_prometheus_metrics():
 
 
 @pytest.fixture(scope="module")
-async def related_prometheus(ops_test: OpsTest, cos_lb_model, cos_lite_installed):
-    cos_model, k8s_alias = cos_lb_model
+async def related_prometheus(ops_test: OpsTest, cos_model, cos_lite_installed):
     model_owner = untag("user-", cos_model.info.owner_tag)
     cos_model_name = cos_model.name
 
-    with ops_test.model_context("main") as model:
+    with ops_test.model_context("main") as k8s_model:
         log.info("Enabling Cilium metrics...")
-        cilium_app = ops_test.model.applications["cilium"]
+        cilium_app = k8s_model.applications["cilium"]
         metrics_config = {"enable-cilium-metrics": "true"}
         await cilium_app.set_config(metrics_config)
 
         log.info("Integrating Prometheus and Cilium...")
-        await ops_test.model.integrate(
+        await k8s_model.integrate(
             "cilium:send-remote-write",
             f"{model_owner}/{cos_model_name}.prometheus-receive-remote-write",
         )
-        await ops_test.model.wait_for_idle(status="active")
-        with ops_test.model_context(k8s_alias) as model:
-            await model.wait_for_idle(status="active")
+        await k8s_model.wait_for_idle(status="active")
+        await cos_model.wait_for_idle(status="active")
 
     yield
 
-    with ops_test.model_context("main") as model:
+    with ops_test.model_context("main") as k8s_model:
         log.info("Removing Cilium metrics...")
-        cilium_app = ops_test.model.applications["cilium"]
+        cilium_app = k8s_model.applications["cilium"]
         metrics_config = {"enable-cilium-metrics": "false"}
         await cilium_app.set_config(metrics_config)
 
         log.info("Removing Prometheus Remote Write SAAS ...")
-        await ops_test.model.remove_saas("prometheus-receive-remote-write")
-        await ops_test.model.wait_for_idle(status="active")
+        await k8s_model.remove_saas("prometheus-receive-remote-write")
+        await k8s_model.wait_for_idle(status="active")
 
-    with ops_test.model_context(k8s_alias) as model:
         log.info("Removing Prometheus Offer...")
-        await model.remove_offer(f"{model.name}.prometheus-receive-remote-write", force=True)
-        await model.wait_for_idle(status="active")
+        await cos_model.remove_offer(
+            f"{cos_model_name}.prometheus-receive-remote-write", force=True
+        )
+        await cos_model.wait_for_idle(status="active")

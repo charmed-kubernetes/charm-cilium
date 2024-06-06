@@ -34,6 +34,8 @@ metadata:
   namespace: kube-system
   labels:
     k8s-app: hubble-relay
+    app.kubernetes.io/name: hubble-relay
+    app.kubernetes.io/part-of: cilium
 spec:
   type: "ClusterIP"
   selector:
@@ -51,6 +53,8 @@ metadata:
   namespace: kube-system
   labels:
     k8s-app: hubble-relay
+    app.kubernetes.io/name: hubble-relay
+    app.kubernetes.io/part-of: cilium
 spec:
   replicas: 1
   selector:
@@ -65,10 +69,12 @@ spec:
       annotations:
       labels:
         k8s-app: hubble-relay
+        app.kubernetes.io/name: hubble-relay
+        app.kubernetes.io/part-of: cilium
     spec:
       containers:
         - name: hubble-relay
-          image: "quay.io/cilium/hubble-relay:v1.12.5@sha256:22039a7a6cb1322badd6b0e5149ba7b11d35a54cf3ac93ce651bebe5a71ac91a"
+          image: "quay.io/cilium/hubble-relay:v1.13.16@sha256:bd54f5ebd81e2b911f3453fda344280510d1695abbe24d097ed2f784e5a82840"
           imagePullPolicy: IfNotPresent
           command:
             - hubble-relay

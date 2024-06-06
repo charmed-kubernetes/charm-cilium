@@ -11,7 +11,7 @@ class Prometheus:
         ops_test,
         host: Optional[str] = "localhost",
     ):
-        """Utility to manage a Prometheus application.
+        """Manage a Prometheus application.
 
         Args:
             ops_test: Default instance of ops_test.

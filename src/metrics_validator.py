@@ -1,4 +1,5 @@
 """Validator for Hubble Metrics configuration values."""
+
 from typing import List
 
 from pydantic import BaseModel, validator

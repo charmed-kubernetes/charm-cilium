@@ -2,26 +2,46 @@
 # See LICENSE file for licensing details.
 
 import logging
+from ipaddress import AddressValueError, IPv4Address
 from typing import Optional
 
-from pytest_operator.plugin import OpsTest
+from juju.model import Model
 
 logger = logging.getLogger(__name__)
 
 
-async def get_address(ops_test: OpsTest, app_name: str, unit_num: Optional[int] = None) -> str:
+def _valid_ipv4(addr: str) -> Optional[IPv4Address]:
+    """Check if a string is a valid IPv4 address.
+
+    Args:
+        addr: string to check
+
+    Returns:
+        valid IPv4 address or None otherwise.
+    """
+    try:
+        return IPv4Address(addr)
+    except AddressValueError:
+        return None
+
+
+async def get_address(model: Model, app_name: str, unit_num: Optional[int] = None) -> str:
     """Find unit address for any application.
 
     Args:
-        ops_test: pytest-operator plugin
+        model: juju model
         app_name: string name of application
         unit_num: integer number of a juju unit
 
     Returns:
         unit address as a string
     """
-    status = await ops_test.model.get_status()
+    status = await model.get_status()
     app = status["applications"][app_name]
+
+    if from_status := [addr for addr in app.status.info.split() if _valid_ipv4(addr)]:
+        return from_status[0]
+
     return (
         app.public_address
         if unit_num is None

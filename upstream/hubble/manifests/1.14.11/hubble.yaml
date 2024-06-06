@@ -17,12 +17,14 @@ data:
     cluster-name: default
     peer-service: "hubble-peer.kube-system.svc.cluster.local:443"
     listen-address: :4245
+    gops: true
+    gops-port: "9893"
     dial-timeout: 
     retry-timeout: 
     sort-buffer-len-max: 
     sort-buffer-drain-timeout: 
-    tls-client-cert-file: /var/lib/hubble-relay/tls/client.crt
-    tls-client-key-file: /var/lib/hubble-relay/tls/client.key
+    tls-hubble-client-cert-file: /var/lib/hubble-relay/tls/client.crt
+    tls-hubble-client-key-file: /var/lib/hubble-relay/tls/client.key
     tls-hubble-server-ca-files: /var/lib/hubble-relay/tls/hubble-server-ca.crt
     disable-server-tls: true
 ---
@@ -34,6 +36,8 @@ metadata:
   namespace: kube-system
   labels:
     k8s-app: hubble-relay
+    app.kubernetes.io/name: hubble-relay
+    app.kubernetes.io/part-of: cilium
 spec:
   type: "ClusterIP"
   selector:
@@ -51,6 +55,8 @@ metadata:
   namespace: kube-system
   labels:
     k8s-app: hubble-relay
+    app.kubernetes.io/name: hubble-relay
+    app.kubernetes.io/part-of: cilium
 spec:
   replicas: 1
   selector:
@@ -65,10 +71,21 @@ spec:
       annotations:
       labels:
         k8s-app: hubble-relay
+        app.kubernetes.io/name: hubble-relay
+        app.kubernetes.io/part-of: cilium
     spec:
+      securityContext:
+        fsGroup: 65532
       containers:
         - name: hubble-relay
-          image: "quay.io/cilium/hubble-relay:v1.12.5@sha256:22039a7a6cb1322badd6b0e5149ba7b11d35a54cf3ac93ce651bebe5a71ac91a"
+          securityContext:
+            capabilities:
+              drop:
+              - ALL
+            runAsGroup: 65532
+            runAsNonRoot: true
+            runAsUser: 65532
+          image: "quay.io/cilium/hubble-relay:v1.14.11@sha256:e3021d0830ea36a84821d988d53ebf246bd1457856d147c433fff39a1022fb94"
           imagePullPolicy: IfNotPresent
           command:
             - hubble-relay
@@ -121,9 +138,9 @@ spec:
           - secret:
               name: hubble-relay-client-certs
               items:
-                - key: ca.crt
-                  path: hubble-server-ca.crt
                 - key: tls.crt
                   path: client.crt
                 - key: tls.key
                   path: client.key
+                - key: ca.crt
+                  path: hubble-server-ca.crt
