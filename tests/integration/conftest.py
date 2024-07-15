@@ -289,13 +289,6 @@ async def grafana_password(ops_test, related_grafana, cos_model):
 
 
 @pytest.fixture(scope="module")
-async def expected_prometheus_metrics():
-    metrics_path = Path("tests/data/cilium-metrics.json")
-    with open(metrics_path, "r") as file:
-        return set(json.load(file)["data"])
-
-
-@pytest.fixture(scope="module")
 async def related_prometheus(ops_test: OpsTest, cos_model, cos_lite_installed):
     model_owner = untag("user-", cos_model.info.owner_tag)
     cos_model_name = cos_model.name
