@@ -18,13 +18,10 @@ from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import (
     PrometheusRemoteWriteConsumer,
 )
-from cilium_manifests import CiliumManifests
 from httpx import ConnectError, HTTPError
-from hubble_manifests import HubbleManifests
 from jinja2 import Environment, FileSystemLoader
 from lightkube import Client, codecs
 from lightkube.core.exceptions import ApiError
-from metrics_validator import HubbleMetrics
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
@@ -37,6 +34,10 @@ from ops.model import (
     WaitingStatus,
 )
 from pydantic import ValidationError
+
+from cilium_manifests import CiliumManifests
+from hubble_manifests import HubbleManifests
+from metrics_validator import HubbleMetrics
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +85,17 @@ class CiliumCharm(CharmBase):
         )
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
+
+        self.framework.observe(self.on.list_versions_action, self._list_versions)
+        self.framework.observe(self.on.list_resources_action, self._list_resources)
+
+    def _list_versions(self, event):
+        self.collector.list_versions(event)
+
+    def _list_resources(self, event):
+        manifests = event.params.get("controller", "")
+        resources = event.params.get("resources", "")
+        return self.collector.list_resources(event, manifests, resources)
 
     @cached_property
     def _arch(self):

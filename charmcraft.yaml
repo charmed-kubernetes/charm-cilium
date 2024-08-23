@@ -18,3 +18,20 @@ bases:
     - name: ubuntu
       channel: "20.04"
       architectures: [amd64, arm64]
+
+actions:
+  list-versions:
+    description: List Cilium Releases supported by this charm
+  list-resources:
+    description: List Cilium Resources of the configured version
+    params:
+      controller:
+        type: string
+        default: ""
+        description: |
+          Filter list based on "cilium" or "hubble" manifests.
+      resources:
+        type: string
+        default: ""
+        description: |
+          Space separated list of kubernetes resource types to filter list result
