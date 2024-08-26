@@ -375,7 +375,9 @@ class CiliumCharm(CharmBase):
             return
 
         if issues := self._environment_issues():
-            self.unit.status = BlockedStatus("Environment issues detected: set logs for details.")
+            self.unit.status = BlockedStatus(
+                "Environment issues detected: check logs for details."
+            )
             log.error("Environment issues:\n%s\n", "\n  -".join(issues))
             return
 

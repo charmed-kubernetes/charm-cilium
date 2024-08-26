@@ -63,21 +63,22 @@ async def test_build_and_deploy(ops_test: OpsTest, version):
     assert rc == 0, f"Bundle deploy failed: {(stderr or stdout).strip()}"
 
     await ops_test.model.block_until(lambda: "cilium" in ops_test.model.applications, timeout=60)
-    await ops_test.model.wait_for_idle(status="active", timeout=ONE_HOUR)
+    # Don't wait for active/idle -- cilium units could be blocked
+    await ops_test.model.wait_for_idle(timeout=ONE_HOUR)
 
 
 async def test_cilium_blocked(ops_test: OpsTest):
     cilium_app = ops_test.model.applications["cilium"]
-    kcp, kw = map(
-        ops_test.model.applications.get, ("kubernetes-control-plane", "kubernetes-worker")
-    )
+    principals = set()
     assert cilium_app.status == "blocked", "Cilium should be blocked"
     for unit in cilium_app.units:
-        assert "Environment issues detected" in unit.workload_status_message
-    await asyncio.gather(
-        kcp.set_config({"sysctl": SYSCTL}),
-        kw.set_config({"sysctl": SYSCTL}),
-    )
+        if unit.agent_status == "blocked":
+            assert "Environment issues detected" in unit.workload_status_message
+            principals.add(unit.principal_unit.split("/")[0])
+
+    # Reconfigure the primary apps
+    apps_with_sysctl = map(ops_test.model.applications.get, principals)
+    await asyncio.gather(*[app.set_config({"sysctl": SYSCTL}) for app in apps_with_sysctl])
     await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
     assert cilium_app.status == "active", "Cilium should be active"
 
