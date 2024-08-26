@@ -30,13 +30,13 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
+      - name: Read charmcraft version file
+        id: charmcraft
+        run: echo "channel=$(cat .charmcraft-channel)" >> $GITHUB_OUTPUT
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: 3.8
-      - name: Read charmcraft version file
-        id: charmcraft
-        run: echo "channel=$(cat .charmcraft-channel)" >> $GITHUB_OUTPUT          
       - name: Setup operator environment
         uses: charmed-kubernetes/actions-operator@main
         with:
