@@ -32,6 +32,17 @@ def pytest_addoption(parser):
         default=None,
         help="Juju kubernetes cloud to reuse; if not provided, will generate a new cloud",
     )
+    parser.addoption(
+        "--cilium-version",
+        action="store",
+        default="1.14.11",
+        help="Cilium version to deploy",
+    )
+
+
+@pytest.fixture
+def version(request):
+    return request.config.getoption("--cilium-version")
 
 
 @pytest.fixture(scope="module")
