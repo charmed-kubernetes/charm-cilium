@@ -12,7 +12,7 @@ from functools import cached_property
 from pathlib import Path
 from subprocess import check_output
 from tarfile import TarError
-from typing import List
+from typing import List, Mapping
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import (
@@ -45,6 +45,14 @@ CLI_CLIENTS_PATH = Path("/usr/local/bin")
 TEMPLATES_PATH = Path("./templates")
 PORT_FORWARD_SERVICE = "hubble-port-forward.service"
 RESOURCES = ["cilium", "hubble"]
+
+
+def _sysctl_get(*keys: str) -> Mapping[str, str]:
+    """Get sysctl values for the specified keys."""
+    if not keys:
+        raise ValueError("At least one key must be provided.")
+    out = check_output(["sysctl", *keys], text=True)
+    return dict(line.split(" = ") for line in out.splitlines())
 
 
 class CiliumCharm(CharmBase):
@@ -355,6 +363,18 @@ class CiliumCharm(CharmBase):
         template = self.jinja2_env.get_template(filename)
         return template.render(**kwargs)
 
+    def _environment_issues(self) -> List[str]:
+        """Check for environment issues and return a list of issues."""
+        issues = []
+        if values := _sysctl_get("net.ipv4.conf.all.rp_filter"):
+            if values["net.ipv4.conf.all.rp_filter"] != "0":
+                log.warning(
+                    "Disable rp_filter on Cilium interfaces since it may cause mangled packets to be dropped. (%s)",
+                    "net.ipv4.conf.all.rp_filter=0",
+                )
+                issues.append("sysctl rp_filter enabled for interfaces.")
+        return issues
+
     def _set_active_status(self):
         if not self.stored.cilium_configured:
             return
@@ -363,6 +383,13 @@ class CiliumCharm(CharmBase):
             return
 
         if self.stored.unallowed_metrics:
+            return
+
+        if issues := self._environment_issues():
+            self.unit.status = BlockedStatus(
+                "Environment issues detected: check logs for details."
+            )
+            log.error("Environment issues:\n%s\n", "\n  -".join(issues))
             return
 
         self.unit.status = ActiveStatus("Ready")

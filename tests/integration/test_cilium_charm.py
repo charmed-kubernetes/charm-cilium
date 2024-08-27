@@ -16,11 +16,12 @@ from pytest_operator.plugin import OpsTest
 log = logging.getLogger(__name__)
 TEN_MINUTES = 10 * 60
 ONE_HOUR = 60 * 60
+SYSCTL = "{net.ipv4.conf.all.forwarding: 1, net.ipv4.conf.all.rp_filter: 0, net.ipv4.neigh.default.gc_thresh1: 128, net.ipv4.neigh.default.gc_thresh2: 28672, net.ipv4.neigh.default.gc_thresh3: 32768, net.ipv6.neigh.default.gc_thresh1: 128, net.ipv6.neigh.default.gc_thresh2: 28672, net.ipv6.neigh.default.gc_thresh3: 32768, fs.inotify.max_user_instances: 8192, fs.inotify.max_user_watches: 1048576, kernel.panic: 10, kernel.panic_on_oops: 1, vm.overcommit_memory: 1}"
 
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest):
+async def test_build_and_deploy(ops_test: OpsTest, version):
     charm = next(Path(".").glob("cilium*.charm"), None)
     if not charm:
         log.info("Build charm...")
@@ -42,7 +43,7 @@ async def test_build_and_deploy(ops_test: OpsTest):
     assert resources, "Failed to build or download resources."
     log.info(resources)
 
-    context = dict(charm=charm.resolve(), **resources)
+    context = dict(charm=charm.resolve(), version=version, **resources)
 
     overlays = [
         ops_test.Bundle("kubernetes-core", channel="edge"),
@@ -62,7 +63,24 @@ async def test_build_and_deploy(ops_test: OpsTest):
     assert rc == 0, f"Bundle deploy failed: {(stderr or stdout).strip()}"
 
     await ops_test.model.block_until(lambda: "cilium" in ops_test.model.applications, timeout=60)
-    await ops_test.model.wait_for_idle(status="active", timeout=ONE_HOUR)
+    # Don't wait for active/idle -- cilium units could be blocked
+    await ops_test.model.wait_for_idle(timeout=ONE_HOUR)
+
+
+async def test_cilium_blocked(ops_test: OpsTest):
+    cilium_app = ops_test.model.applications["cilium"]
+    principals = set()
+    assert cilium_app.status == "blocked", "Cilium should be blocked"
+    for unit in cilium_app.units:
+        if unit.agent_status == "blocked":
+            assert "Environment issues detected" in unit.workload_status_message
+            principals.add(unit.principal_unit.split("/")[0])
+
+    # Reconfigure the primary apps
+    apps_with_sysctl = map(ops_test.model.applications.get, principals)
+    await asyncio.gather(*[app.set_config({"sysctl": SYSCTL}) for app in apps_with_sysctl])
+    await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
+    assert cilium_app.status == "active", "Cilium should be active"
 
 
 async def test_cli_resources(ops_test: OpsTest):

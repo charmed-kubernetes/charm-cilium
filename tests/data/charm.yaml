@@ -6,6 +6,8 @@ applications:
       allow-privileged: "true"
   cilium:
     charm: {{charm}}
+    options:
+      release: '{{ version }}'
     resources:
       cilium: {{cilium}}
       hubble: {{hubble}}
