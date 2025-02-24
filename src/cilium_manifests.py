@@ -134,6 +134,19 @@ class SetIPv4CIDR(Patch):
         data["cluster-pool-ipv4-mask-size"] = self.manifests.config["cluster-pool-ipv4-mask-size"]
 
 
+class PatchTunnelProtocol(Patch):
+    """Configure Network tunnel Encapsulation protocol."""
+
+    def __call__(self, obj) -> None:
+        if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
+            return
+
+        if not self.manifests.config["use-geneve-protocol"]:
+            return
+
+        data = obj.data
+        data["tunnel-protocol"] = "geneve"
+
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
 
@@ -148,6 +161,7 @@ class CiliumManifests(Manifests):
             PatchPrometheusConfigMap(self),
             PatchHubbleMetricsConfigMap(self),
             SetIPv4CIDR(self),
+            PatchTunnelProtocol(self),
         ]
 
         super().__init__("cilium", charm.model, "upstream/cilium", manipulations)
