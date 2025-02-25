@@ -79,8 +79,17 @@ async def test_cilium_blocked(ops_test: OpsTest):
     # Reconfigure the primary apps
     apps_with_sysctl = map(ops_test.model.applications.get, principals)
     await asyncio.gather(*[app.set_config({"sysctl": SYSCTL}) for app in apps_with_sysctl])
-    await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
+    async with ops_test.fast_forward("30s"):
+        await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
     assert cilium_app.status == "active", "Cilium should be active"
+
+
+async def test_cilium_geneve_protocol(ops_test: OpsTest):
+    log.info("Switching to Geneve protocol in Cilium...")
+    cilium_app = ops_test.model.applications["cilium"]
+    await cilium_app.set_config({"use-geneve-protocol": "true"})
+    async with ops_test.fast_forward("30s"):
+        await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
 
 
 async def test_cli_resources(ops_test: OpsTest):
@@ -165,3 +174,4 @@ async def test_prometheus(ops_test, traefik_ingress):
     await asyncio.sleep(120)
     metrics = await prometheus.get_metrics()
     assert any(m.startswith("cilium_") for m in metrics), "No cilium metrics found in Prometheus"
+
