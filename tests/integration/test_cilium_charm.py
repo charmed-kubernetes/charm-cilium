@@ -174,4 +174,4 @@ async def test_prometheus(ops_test, traefik_ingress):
     await asyncio.sleep(120)
     metrics = await prometheus.get_metrics()
     assert any(m.startswith("cilium_") for m in metrics), "No cilium metrics found in Prometheus"
-
+    

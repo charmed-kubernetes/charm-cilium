@@ -138,6 +138,7 @@ class PatchTunnelProtocol(Patch):
     """Configure Network tunnel Encapsulation protocol."""
 
     def __call__(self, obj) -> None:
+        """Update Cilium tunnel encapsulation protocol."""
         if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
             return
 
@@ -146,6 +147,7 @@ class PatchTunnelProtocol(Patch):
 
         data = obj.data
         data["tunnel-protocol"] = "geneve"
+
 
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
