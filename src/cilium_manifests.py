@@ -4,8 +4,11 @@ import hashlib
 import json
 import logging
 from typing import Dict, Optional
+from pydantic import ValidationError
 
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
+
+from cilium_validators import TunnelEncapsulationProtocol
 
 log = logging.getLogger(__name__)
 
@@ -142,11 +145,13 @@ class PatchTunnelProtocol(Patch):
         if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
             return
 
-        if not self.manifests.config["use-geneve-protocol"]:
+        if not self.manifests.tunnel_protocol:
             return
-
+        
+        log.info(f"Patching cilium tunnel protocol: {self.manifests.tunnel_protocol}")
+        
         data = obj.data
-        data["tunnel-protocol"] = "geneve"
+        data["tunnel-protocol"] = self.manifests.tunnel_protocol
 
 
 class CiliumManifests(Manifests):
@@ -169,6 +174,15 @@ class CiliumManifests(Manifests):
         super().__init__("cilium", charm.model, "upstream/cilium", manipulations)
         self.charm_config = charm_config
         self.hubble_metrics = hubble_metrics
+
+    def apply_manifests(self) -> None:
+        """Apply all manifest files from the current release after manipulating and validation."""
+        if tp_value := self.charm_config["tunnel_protocol"]:
+            try:
+                self.tunnel_protocol = TunnelEncapsulationProtocol(tunnel_protocol=tp_value)
+            except ValidationError:
+                raise
+        return super().apply_manifests()
 
     @property
     def config(self) -> Dict:
