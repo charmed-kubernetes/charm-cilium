@@ -6,6 +6,9 @@ import logging
 from typing import Dict, Optional
 
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
+from pydantic import ValidationError
+
+from cilium_validators import TunnelEncapsulationProtocol
 
 log = logging.getLogger(__name__)
 
@@ -134,6 +137,23 @@ class SetIPv4CIDR(Patch):
         data["cluster-pool-ipv4-mask-size"] = self.manifests.config["cluster-pool-ipv4-mask-size"]
 
 
+class PatchTunnelProtocol(Patch):
+    """Configure Network tunnel Encapsulation protocol."""
+
+    def __call__(self, obj) -> None:
+        """Update Cilium tunnel encapsulation protocol."""
+        if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
+            return
+
+        if not self.manifests.tunnel_protocol:
+            return
+
+        log.info(f"Patching cilium tunnel protocol: {self.manifests.tunnel_protocol}")
+
+        data = obj.data
+        data["tunnel-protocol"] = self.manifests.tunnel_protocol
+
+
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
 
@@ -148,11 +168,21 @@ class CiliumManifests(Manifests):
             PatchPrometheusConfigMap(self),
             PatchHubbleMetricsConfigMap(self),
             SetIPv4CIDR(self),
+            PatchTunnelProtocol(self),
         ]
 
         super().__init__("cilium", charm.model, "upstream/cilium", manipulations)
         self.charm_config = charm_config
         self.hubble_metrics = hubble_metrics
+
+    def apply_manifests(self) -> None:
+        """Apply all manifest files from the current release after manipulating and validation."""
+        if tp_value := self.charm_config["tunnel_protocol"]:
+            try:
+                self.tunnel_protocol = TunnelEncapsulationProtocol(tunnel_protocol=tp_value)
+            except ValidationError:
+                raise
+        return super().apply_manifests()
 
     @property
     def config(self) -> Dict:

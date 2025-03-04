@@ -135,9 +135,14 @@ class CiliumCharm(CharmBase):
         if not self._get_kubeconfig_status():
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
 
-        log.info("Applying Cilium manifests")
-        self._configure_hubble(event)
-        self._configure_cilium_cni(event)
+        try:
+            log.info("Applying Cilium manifests")
+            self._configure_hubble(event)
+            self._configure_cilium_cni(event)
+        except ValidationError as e:
+            self.unit.status = BlockedStatus(str(e))
+            log.exception(str(e))
+            return
 
         self.stored.cilium_configured = True
 
@@ -150,6 +155,8 @@ class CiliumCharm(CharmBase):
             return self._ops_wait_for(
                 event, "Waiting to retry Cilium configuration.", exc_info=True
             )
+        except ValidationError:
+            raise
 
     def _configure_cni_relation(self):
         self.unit.status = MaintenanceStatus("Configuring CNI relation")
