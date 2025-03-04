@@ -1,6 +1,6 @@
 """Validators for Cilium configuration values."""
 
-from pydantic import BaseModel, validator, ValidationError
+from pydantic import BaseModel, ValidationError, validator
 
 
 class TunnelEncapsulationProtocol(BaseModel):
@@ -15,7 +15,7 @@ class TunnelEncapsulationProtocol(BaseModel):
             "vxlan",
             "geneve",
         }
-        
+
         if v not in allowed_values:
             raise ValidationError(f"{v} is not an allowed Cilium tunnel encapsulation protocol.")
         return v

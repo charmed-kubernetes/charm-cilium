@@ -140,9 +140,9 @@ class CiliumCharm(CharmBase):
             self._configure_hubble(event)
             self._configure_cilium_cni(event)
         except ValidationError as e:
-                self.unit.status = BlockedStatus(str(e))
-                log.exception(str(e))
-                return
+            self.unit.status = BlockedStatus(str(e))
+            log.exception(str(e))
+            return
 
         self.stored.cilium_configured = True
 

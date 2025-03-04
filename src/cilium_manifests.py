@@ -4,9 +4,9 @@ import hashlib
 import json
 import logging
 from typing import Dict, Optional
-from pydantic import ValidationError
 
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
+from pydantic import ValidationError
 
 from cilium_validators import TunnelEncapsulationProtocol
 
@@ -147,9 +147,9 @@ class PatchTunnelProtocol(Patch):
 
         if not self.manifests.tunnel_protocol:
             return
-        
+
         log.info(f"Patching cilium tunnel protocol: {self.manifests.tunnel_protocol}")
-        
+
         data = obj.data
         data["tunnel-protocol"] = self.manifests.tunnel_protocol
 
