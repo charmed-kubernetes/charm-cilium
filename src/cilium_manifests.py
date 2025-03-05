@@ -142,11 +142,13 @@ class PatchTunnelProtocol(Patch):
         if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
             return
 
-        if not self.manifests.config["use-geneve-protocol"]:
+        if not self.manifests.config["tunnel-protocol"]:
             return
 
+        log.info(f"Patching cilium tunnel protocol: {self.manifests.config['tunnel-protocol']}")
+
         data = obj.data
-        data["tunnel-protocol"] = "geneve"
+        data["tunnel-protocol"] = self.manifests.config["tunnel-protocol"]
 
 
 class CiliumManifests(Manifests):

@@ -54,8 +54,13 @@ options:
   release:
     description: Version of Cilium to deploy
     type: string
-  use-geneve-protocol:
-    type: boolean 
-    default: false
+  tunnel-protocol:
+    type: string 
+    default: vxlan
     description: | 
-      Enable geneve UDP-based tunnel encapsulation protocol instead of vxlan
+      Type of Cilium tunnel encapsulation protocol.
+      The default encapsulation protocol is vxlan. 
+      
+      valid options are:
+          * vxlan
+          * geneve
