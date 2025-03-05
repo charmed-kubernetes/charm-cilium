@@ -54,3 +54,13 @@ options:
   release:
     description: Version of Cilium to deploy
     type: string
+  tunnel-protocol:
+    type: string 
+    default: vxlan
+    description: | 
+      Type of Cilium tunnel encapsulation protocol.
+      The default encapsulation protocol is vxlan. 
+      
+      valid options are:
+          * vxlan
+          * geneve
