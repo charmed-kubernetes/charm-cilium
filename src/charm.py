@@ -278,8 +278,9 @@ class CiliumCharm(CharmBase):
     def _on_config_changed(self, event):
         self._configure_cni_relation()
         self._configure_cilium(event)
-        self._install_cli_resources()
-        self._on_port_forward_hubble()
+        if self.stored.cilium_configured:
+            self._install_cli_resources()
+            self._on_port_forward_hubble()
         self._set_active_status()
 
     def _on_cni_relation_changed(self, event):

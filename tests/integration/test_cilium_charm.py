@@ -86,7 +86,7 @@ async def test_cilium_blocked(ops_test: OpsTest):
 
 async def test_cilium_tunnel_protocol(ops_test: OpsTest):
     cilium_app = ops_test.model.applications["cilium"]
-    
+
     log.info("Switching to gre protocol in Cilium...")
     await cilium_app.set_config({"tunnel-protocol": "gre"})
     async with ops_test.fast_forward("30s"):
@@ -97,6 +97,7 @@ async def test_cilium_tunnel_protocol(ops_test: OpsTest):
     await cilium_app.set_config({"tunnel-protocol": "geneve"})
     async with ops_test.fast_forward("30s"):
         await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
+    assert cilium_app.status == "active", "Cilium should be active"
 
 
 async def test_cli_resources(ops_test: OpsTest):
