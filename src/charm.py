@@ -154,8 +154,10 @@ class CiliumCharm(CharmBase):
                 event, "Waiting to retry Cilium configuration.", exc_info=True
             )
         except (ValidationError, ValueError) as e:
-            self.unit.status = BlockedStatus("Invalid Cilium configuration")
-            log.exception(e.errors())
+            errors = e.errors()
+            key = errors[0].get("msg", "Unknown") if errors else "Unknown"
+            self.unit.status = BlockedStatus(f"Invalid Cilium configuration: {key}")
+            log.exception(errors)
             return
         
     def _configure_cni_relation(self):
