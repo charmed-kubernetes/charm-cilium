@@ -38,6 +38,8 @@ from pydantic import ValidationError
 from cilium_manifests import CiliumManifests
 from hubble_manifests import HubbleManifests
 from metrics_validator import HubbleMetrics
+from cilium_validators import TunnelEncapsulationProtocol
+
 
 log = logging.getLogger(__name__)
 
@@ -136,21 +138,28 @@ class CiliumCharm(CharmBase):
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
 
         log.info("Applying Cilium manifests")
+            
         self._configure_hubble(event)
         self._configure_cilium_cni(event)
-
-        self.stored.cilium_configured = True
-
+        
     def _configure_cilium_cni(self, event):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
             self.cilium_manifests.service_cidr = self._get_service_cidr()
+            TunnelEncapsulationProtocol(tunnel_protocol=self.model.config["tunnel-protocol"])
             self.cilium_manifests.apply_manifests()
+            self.stored.cilium_configured = True
         except (ManifestClientError, ConnectError):
             return self._ops_wait_for(
                 event, "Waiting to retry Cilium configuration.", exc_info=True
             )
-
+        except (ValidationError, ValueError) as e:
+            errors = e.errors()
+            key = errors[0].get("msg", "Unknown") if errors else "Unknown"
+            self.unit.status = BlockedStatus(f"Invalid Cilium configuration: {key}")
+            log.exception(errors)
+            return
+        
     def _configure_cni_relation(self):
         self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
@@ -271,8 +280,9 @@ class CiliumCharm(CharmBase):
     def _on_config_changed(self, event):
         self._configure_cni_relation()
         self._configure_cilium(event)
-        self._install_cli_resources()
-        self._on_port_forward_hubble()
+        if self.stored.cilium_configured:
+            self._install_cli_resources()
+            self._on_port_forward_hubble()
         self._set_active_status()
 
     def _on_cni_relation_changed(self, event):
