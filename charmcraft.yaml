@@ -9,9 +9,9 @@ description: |
   within Linux itself.
 links:
   contact:
-    - Kevin Monroe <kevin.monroe@canonical.com>
     - Adam Dyess <adam.dyess@canonical.com>
     - Mateo Florido <mateo.florido@canonical.com>
+    - Reza Abbasalipour <reza.abbasalipour@canonical.com>
   source: https://github.com/charmed-kubernetes/charm-cilium
   issues:
   - https://bugs.launchpad.net/charm-cilium
@@ -50,12 +50,9 @@ parts:
 bases:
   - build-on:
     - name: ubuntu
-      channel: "20.04"
+      channel: "22.04"
       architectures: [amd64]
     run-on:
-    - name: ubuntu
-      channel: "20.04"
-      architectures: [amd64, arm64]
     - name: ubuntu
       channel: "22.04"
       architectures: [amd64, arm64]

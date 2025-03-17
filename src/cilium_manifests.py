@@ -191,6 +191,7 @@ class CiliumManifests(Manifests):
 
         Returns:
             str: The SHA256 hash
+
         """
         json_str = json.dumps(self.config, sort_keys=True)
         hash = hashlib.sha256()
