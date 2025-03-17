@@ -150,12 +150,13 @@ class PatchTunnelProtocol(Patch):
         data = obj.data
         data["tunnel-protocol"] = self.manifests.config["tunnel-protocol"]
 
+
 class PatchTunnelPort(Patch):
     """Adjust tunnel encapsulation port to avoid any possible conflicts.
-    
-    Running Cilium with Vxlan protocol on default destination port may 
-    result in conflicts with the underlay network's fan networking features, 
-    which is also using vxlan with default port under the hood. 
+
+    Running Cilium with Vxlan protocol on default destination port may
+    result in conflicts with the underlay network's fan networking features,
+    which is also using vxlan with default port under the hood.
     """
 
     def __call__(self, obj) -> None:
@@ -168,10 +169,11 @@ class PatchTunnelPort(Patch):
         if protocol and protocol != "vxlan":
             return
 
-        log.info(f"Patching cilium tunnel port for vxlan")
+        log.info("Patching cilium tunnel port for vxlan")
 
         data = obj.data
         data["tunnel-port"] = "8473"
+
 
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
