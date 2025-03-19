@@ -12,19 +12,16 @@ from functools import cached_property
 from pathlib import Path
 from subprocess import check_output
 from tarfile import TarError
-from typing import List
+from typing import List, Mapping
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import (
     PrometheusRemoteWriteConsumer,
 )
-from cilium_manifests import CiliumManifests
 from httpx import ConnectError, HTTPError
-from hubble_manifests import HubbleManifests
 from jinja2 import Environment, FileSystemLoader
 from lightkube import Client, codecs
 from lightkube.core.exceptions import ApiError
-from metrics_validator import HubbleMetrics
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
@@ -38,12 +35,26 @@ from ops.model import (
 )
 from pydantic import ValidationError
 
+from cilium_manifests import CiliumManifests
+from hubble_manifests import HubbleManifests
+from metrics_validator import HubbleMetrics
+from cilium_validators import TunnelEncapsulationProtocol
+
+
 log = logging.getLogger(__name__)
 
 CLI_CLIENTS_PATH = Path("/usr/local/bin")
 TEMPLATES_PATH = Path("./templates")
 PORT_FORWARD_SERVICE = "hubble-port-forward.service"
 RESOURCES = ["cilium", "hubble"]
+
+
+def _sysctl_get(*keys: str) -> Mapping[str, str]:
+    """Get sysctl values for the specified keys."""
+    if not keys:
+        raise ValueError("At least one key must be provided.")
+    out = check_output(["sysctl", *keys], text=True)
+    return dict(line.split(" = ") for line in out.splitlines())
 
 
 class CiliumCharm(CharmBase):
@@ -85,6 +96,17 @@ class CiliumCharm(CharmBase):
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
 
+        self.framework.observe(self.on.list_versions_action, self._list_versions)
+        self.framework.observe(self.on.list_resources_action, self._list_resources)
+
+    def _list_versions(self, event):
+        self.collector.list_versions(event)
+
+    def _list_resources(self, event):
+        manifests = event.params.get("controller", "")
+        resources = event.params.get("resources", "")
+        return self.collector.list_resources(event, manifests, resources)
+
     @cached_property
     def _arch(self):
         architecture = check_output(["dpkg", "--print-architecture"]).rstrip()
@@ -116,21 +138,28 @@ class CiliumCharm(CharmBase):
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
 
         log.info("Applying Cilium manifests")
+            
         self._configure_hubble(event)
         self._configure_cilium_cni(event)
-
-        self.stored.cilium_configured = True
-
+        
     def _configure_cilium_cni(self, event):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
             self.cilium_manifests.service_cidr = self._get_service_cidr()
+            TunnelEncapsulationProtocol(tunnel_protocol=self.model.config["tunnel-protocol"])
             self.cilium_manifests.apply_manifests()
+            self.stored.cilium_configured = True
         except (ManifestClientError, ConnectError):
             return self._ops_wait_for(
                 event, "Waiting to retry Cilium configuration.", exc_info=True
             )
-
+        except (ValidationError, ValueError) as e:
+            errors = e.errors()
+            key = errors[0].get("msg", "Unknown") if errors else "Unknown"
+            self.unit.status = BlockedStatus(f"Invalid Cilium configuration: {key}")
+            log.exception(errors)
+            return
+        
     def _configure_cni_relation(self):
         self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
@@ -251,8 +280,9 @@ class CiliumCharm(CharmBase):
     def _on_config_changed(self, event):
         self._configure_cni_relation()
         self._configure_cilium(event)
-        self._install_cli_resources()
-        self._on_port_forward_hubble()
+        if self.stored.cilium_configured:
+            self._install_cli_resources()
+            self._on_port_forward_hubble()
         self._set_active_status()
 
     def _on_cni_relation_changed(self, event):
@@ -343,6 +373,18 @@ class CiliumCharm(CharmBase):
         template = self.jinja2_env.get_template(filename)
         return template.render(**kwargs)
 
+    def _environment_issues(self) -> List[str]:
+        """Check for environment issues and return a list of issues."""
+        issues = []
+        if values := _sysctl_get("net.ipv4.conf.all.rp_filter"):
+            if values["net.ipv4.conf.all.rp_filter"] != "0":
+                log.warning(
+                    "Disable rp_filter on Cilium interfaces since it may cause mangled packets to be dropped. (%s)",
+                    "net.ipv4.conf.all.rp_filter=0",
+                )
+                issues.append("sysctl rp_filter enabled for interfaces.")
+        return issues
+
     def _set_active_status(self):
         if not self.stored.cilium_configured:
             return
@@ -351,6 +393,13 @@ class CiliumCharm(CharmBase):
             return
 
         if self.stored.unallowed_metrics:
+            return
+
+        if issues := self._environment_issues():
+            self.unit.status = BlockedStatus(
+                "Environment issues detected: check logs for details."
+            )
+            log.error("Environment issues:\n%s\n", "\n  -".join(issues))
             return
 
         self.unit.status = ActiveStatus("Ready")
