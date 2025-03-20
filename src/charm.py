@@ -70,6 +70,8 @@ class CiliumCharm(CharmBase):
             hubble_configured=False,
             hubble_mismatch_config=False,
             unallowed_metrics=False,
+            cilium_tunnel_protocol=None,
+            cilium_tunnel_port=None,
         )
 
         self.hubble_metrics: List[str] = []
