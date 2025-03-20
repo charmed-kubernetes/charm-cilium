@@ -13,6 +13,8 @@ from pathlib import Path
 from subprocess import check_output
 from tarfile import TarError
 from typing import List, Mapping
+from pyroute2 import IPRoute
+
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import (
@@ -135,6 +137,10 @@ class CiliumCharm(CharmBase):
 
         if not self._get_kubeconfig_status():
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
+
+        # updating Cilium tunnel-port doesn't create a new vxlan interface unless we remove
+        # the previous one first
+        self._remove_cilium_vxlan()
 
         log.info("Applying Cilium manifests")
 
@@ -283,7 +289,6 @@ class CiliumCharm(CharmBase):
 
     def _on_config_changed(self, event):
         self._configure_cni_relation()
-        self._remove_cilium_vxlan()
         self._configure_cilium(event)
         if self.stored.cilium_configured:
             self._install_cli_resources()
@@ -379,15 +384,16 @@ class CiliumCharm(CharmBase):
         return template.render(**kwargs)
 
     def _remove_cilium_vxlan(self) -> None:
+        ip = IPRoute()
         try:
-            subprocess.run(
-                ["ip", "link", "delete", "cilium_vxlan"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            log.warning(f"Cilium vxlan interface remove Error: {e}")
+            idx = ip.link_lookup(ifname="cilium_vxlan")
+            if idx:
+                ip.link('del', index=idx[0])
+        except Exception as e:
+            print(f"Error in removing the cilium interface: {e}")
+        finally:
+            ip.close()
+
 
     def _environment_issues(self) -> List[str]:
         """Check for environment issues and return a list of issues."""
@@ -407,26 +413,34 @@ class CiliumCharm(CharmBase):
         return issues
 
     def _is_vxlan_port_reused_by_fan(self) -> bool:
-        ps_number_using_vxlan_dst_port = 0
-        try:
-            result = subprocess.run(
-                ["ip", "-d", "link", "show", "type", "vxlan"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            for line in result.stdout.splitlines():
-                if f"dstport {self.stored.cilium_tunnel_port}" in line:
-                    ps_number_using_vxlan_dst_port += 1
+        log.info(f"checking for validity of vxlan tunnel on port {self.stored.cilium_tunnel_port}")
+        
+        ps_number_using_vxlan_dst_port = 0 
+        ip = IPRoute()
+        links = ip.get_links()
+    
+        for link in links:
+            attrs = dict(link['attrs'])
+            info_data = dict(attrs.get('IFLA_LINKINFO', {}).get('attrs', {})).get('IFLA_INFO_DATA', {})
+            info_data_attrs = dict(info_data.get('attrs', {}))
+            if str(info_data_attrs.get('IFLA_VXLAN_PORT')) == self.stored.cilium_tunnel_port:
+                log.info(f'interface {attrs.get("IFLA_IFNAME")} is using port {self.stored.cilium_tunnel_port}')
+                ps_number_using_vxlan_dst_port += 1
 
-            if ps_number_using_vxlan_dst_port > 1:
-                return True
-            return False
+        ip.close()
 
-        except subprocess.CalledProcessError as e:
-            log.warning(f"vxlan check Error: {e}")
+        if ps_number_using_vxlan_dst_port > 1:
+            return True
+        return False
 
     def _set_active_status(self):
+        if issues := self._environment_issues():
+            self.unit.status = BlockedStatus(
+                "Environment issues detected: check logs for details."
+            )
+            log.error("Environment issues:\n%s\n", "\n  -".join(issues))
+            return
+        
         if not self.stored.cilium_configured:
             return
 
@@ -434,13 +448,6 @@ class CiliumCharm(CharmBase):
             return
 
         if self.stored.unallowed_metrics:
-            return
-
-        if issues := self._environment_issues():
-            self.unit.status = BlockedStatus(
-                "Environment issues detected: check logs for details."
-            )
-            log.error("Environment issues:\n%s\n", "\n  -".join(issues))
             return
 
         self.unit.status = ActiveStatus("Ready")
