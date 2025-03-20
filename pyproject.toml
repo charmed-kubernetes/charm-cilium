@@ -15,7 +15,6 @@ log_cli_level = "INFO"
 # Linting tools configuration
 [tool.ruff]
 line-length = 99
-target-version = "py38"
 extend-exclude = ["__pycache__", "*.egg_info"]
 
 [tool.codespell]
