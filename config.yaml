@@ -64,3 +64,12 @@ options:
       valid options are:
           * vxlan
           * geneve
+  tunnel-port:
+    type: string
+    description: |
+      The defaults based on the tunnelling-mode will be selected:
+        
+      vxlan will use port 8472
+      geneve will use port 6081
+        
+      if set, the user configured port will be used over the default

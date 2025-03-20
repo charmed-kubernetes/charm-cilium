@@ -36,7 +36,7 @@ from ops.model import (
 from pydantic import ValidationError
 
 from cilium_manifests import CiliumManifests
-from cilium_validators import TunnelEncapsulationProtocol
+from cilium_validators import TunnelEncapsulation
 from hubble_manifests import HubbleManifests
 from metrics_validator import HubbleMetrics
 
@@ -145,7 +145,12 @@ class CiliumCharm(CharmBase):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
             self.cilium_manifests.service_cidr = self._get_service_cidr()
-            TunnelEncapsulationProtocol(tunnel_protocol=self.model.config["tunnel-protocol"])
+            cilium_tunnel = TunnelEncapsulation(
+                tunnel_protocol=self.model.config.get("tunnel-protocol"),
+                tunnel_port=self.model.config.get("tunnel-port"),
+            )
+            self.stored.cilium_tunnel_port = cilium_tunnel.tunnel_port
+            self.stored.cilium_tunnel_protocol = cilium_tunnel.tunnel_protocol
             self.cilium_manifests.apply_manifests()
             self.stored.cilium_configured = True
         except (ManifestClientError, ConnectError):
@@ -278,6 +283,7 @@ class CiliumCharm(CharmBase):
 
     def _on_config_changed(self, event):
         self._configure_cni_relation()
+        self._remove_cilium_vxlan()
         self._configure_cilium(event)
         if self.stored.cilium_configured:
             self._install_cli_resources()
@@ -372,9 +378,21 @@ class CiliumCharm(CharmBase):
         template = self.jinja2_env.get_template(filename)
         return template.render(**kwargs)
 
+    def _remove_cilium_vxlan(self) -> None:
+        try:
+            subprocess.run(
+                ["ip", "link", "delete", "cilium_vxlan"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            log.warning(f"Cilium vxlan interface remove Error: {e}")
+
     def _environment_issues(self) -> List[str]:
         """Check for environment issues and return a list of issues."""
         issues = []
+
         if values := _sysctl_get("net.ipv4.conf.all.rp_filter"):
             if values["net.ipv4.conf.all.rp_filter"] != "0":
                 log.warning(
@@ -382,7 +400,31 @@ class CiliumCharm(CharmBase):
                     "net.ipv4.conf.all.rp_filter=0",
                 )
                 issues.append("sysctl rp_filter enabled for interfaces.")
+
+        if self.stored.cilium_tunnel_protocol == "vxlan" and self._is_vxlan_port_reused_by_fan():
+            issues.append("vxlan dst port is already in use. Set another tunnel-port.")
+
         return issues
+
+    def _is_vxlan_port_reused_by_fan(self) -> bool:
+        ps_number_using_vxlan_dst_port = 0
+        try:
+            result = subprocess.run(
+                ["ip", "-d", "link", "show", "type", "vxlan"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            for line in result.stdout.splitlines():
+                if f"dstport {self.stored.cilium_tunnel_port}" in line:
+                    ps_number_using_vxlan_dst_port += 1
+
+            if ps_number_using_vxlan_dst_port > 1:
+                return True
+            return False
+
+        except subprocess.CalledProcessError as e:
+            log.warning(f"vxlan check Error: {e}")
 
     def _set_active_status(self):
         if not self.stored.cilium_configured:
