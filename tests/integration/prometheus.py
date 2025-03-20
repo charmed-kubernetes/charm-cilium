@@ -16,6 +16,7 @@ class Prometheus:
         Args:
             ops_test: Default instance of ops_test.
             host: Optional host address of Prometheus application, defaults to `localhost`
+
         """
         self.ops_test = ops_test
         self.base_uri = f"http://{host}/cos-prometheus-0"
@@ -25,6 +26,7 @@ class Prometheus:
 
         Returns:
           True if Prometheus is ready (returned 'Prometheus is Ready.'); False otherwise.
+
         """
         res = await self.health()
         return "Prometheus Server is Ready." in res
@@ -37,6 +39,7 @@ class Prometheus:
 
         Returns:
             Empty :str: if it is not up, otherwise a str containing "Prometheus is Ready"
+
         """
         api_path = "-/ready"
         uri = f"{self.base_uri}/{api_path}"
@@ -51,6 +54,7 @@ class Prometheus:
 
         Returns:
           Found metrics, if any
+
         """
         api_path = "api/v1/label/__name__/values"
         uri = f"{self.base_uri}/{api_path}"

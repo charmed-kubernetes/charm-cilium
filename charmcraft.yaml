@@ -1,4 +1,45 @@
 type: charm
+name: cilium
+summary: A Kubernetes CNI solution developed on top of eBPF
+description: |
+  Cilium is open source software for transparently securing the network connectivity 
+  between application services deployed using Linux container management platforms. 
+  At the foundation of Cilium is a new Linux kernel technology called eBPF, which 
+  enables the dynamic insertion of powerful security visibility and control logic 
+  within Linux itself.
+links:
+  contact:
+    - Adam Dyess <adam.dyess@canonical.com>
+    - Mateo Florido <mateo.florido@canonical.com>
+    - Reza Abbasalipour <reza.abbasalipour@canonical.com>
+  source: https://github.com/charmed-kubernetes/charm-cilium
+  issues:
+  - https://bugs.launchpad.net/charm-cilium
+
+subordinate: true
+
+provides:
+  grafana-dashboard:
+    interface: grafana_dashboard
+requires:
+  cni:
+    interface: kubernetes-cni
+    scope: container
+  send-remote-write:
+    interface: prometheus_remote_write
+
+resources:
+  cilium:
+    type: file
+    filename: cilium.tar.gz
+    description: |
+      CLI to install, manage & troubleshoot Kubernetes clusters running Cilium.
+  hubble:
+    type: file
+    filename: hubble.tar.gz
+    description: |
+      CLI to access the observability data collected by Hubble.
+
 parts:
   charm:
     build-packages: [git]
@@ -9,14 +50,14 @@ parts:
 bases:
   - build-on:
     - name: ubuntu
-      channel: "20.04"
+      channel: "22.04"
       architectures: [amd64]
     run-on:
     - name: ubuntu
       channel: "22.04"
       architectures: [amd64, arm64]
     - name: ubuntu
-      channel: "20.04"
+      channel: "24.04"
       architectures: [amd64, arm64]
 
 actions:
