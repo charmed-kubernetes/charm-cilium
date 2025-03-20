@@ -18,6 +18,7 @@ def _valid_ipv4(addr: str) -> Optional[IPv4Address]:
 
     Returns:
         valid IPv4 address or None otherwise.
+
     """
     try:
         return IPv4Address(addr)
@@ -35,6 +36,7 @@ async def get_address(model: Model, app_name: str, unit_num: Optional[int] = Non
 
     Returns:
         unit address as a string
+
     """
     status = await model.get_status()
     app = status["applications"][app_name]

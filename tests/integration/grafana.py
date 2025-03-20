@@ -20,6 +20,7 @@ class Grafana:
             host: Optional host address of Grafana application, defaults to `localhost`.
             username: Optional username to connect with, defaults to `admin`.
             password: Optional password to connect with, defaults to `""`.
+
         """
         self.ops_test = ops_test
         self.base_uri = f"http://{host}/cos-grafana"
@@ -31,6 +32,7 @@ class Grafana:
 
         Returns:
           True if Grafana is ready (returned database information OK); False otherwise.
+
         """
         res = await self.health()
         return res.get("database", "") == "ok" or False
@@ -40,6 +42,7 @@ class Grafana:
 
         Returns:
             Empty :dict: if it is not up, otherwise a dict containing basic API health
+
         """
         api_path = "api/health"
         uri = f"{self.base_uri}/{api_path}"
@@ -54,6 +57,7 @@ class Grafana:
 
         Returns:
           Found dashboards, if any
+
         """
         api_path = "api/search"
         uri = f"{self.base_uri}/{api_path}?starred=false"

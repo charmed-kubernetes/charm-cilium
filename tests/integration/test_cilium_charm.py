@@ -92,7 +92,7 @@ async def test_cilium_tunnel_protocol(ops_test: OpsTest):
     async with ops_test.fast_forward("30s"):
         await ops_test.model.wait_for_idle(timeout=TEN_MINUTES)
     assert cilium_app.status == "blocked", "Cilium should be blocked"
-    
+
     log.info("Switching to Geneve protocol in Cilium...")
     await cilium_app.set_config({"tunnel-protocol": "geneve"})
     async with ops_test.fast_forward("30s"):
@@ -108,9 +108,9 @@ async def test_cli_resources(ops_test: OpsTest):
         cmd = " && ".join(cmds)
         log.info(f"Running {cmd} on {unit.machine.hostname}")
         action = await unit.run(cmd, timeout=60, block=True)
-        assert (
-            action.status == "completed" and action.results["return-code"] == 0
-        ), f"Failed to execute {cmd} on machine: {unit.machine.hostname}\n{action.results}"
+        assert action.status == "completed" and action.results["return-code"] == 0, (
+            f"Failed to execute {cmd} on machine: {unit.machine.hostname}\n{action.results}"
+        )
 
 
 @pytest.fixture
@@ -145,9 +145,9 @@ async def test_hubble(ops_test, active_hubble, kubectl_exec):
     stdout = None
     while not stdout:
         action = await cilium.run(cmd, timeout=10, block=True)
-        assert (
-            action.status == "completed" and action.results["return-code"] == 0
-        ), f"Failed to fetch Hubble logs {cmd} on machine: {cilium.machine.hostname}\n{action.results}"
+        assert action.status == "completed" and action.results["return-code"] == 0, (
+            f"Failed to fetch Hubble logs {cmd} on machine: {cilium.machine.hostname}\n{action.results}"
+        )
         stdout = action.results.get("stdout")
 
     forwarded = len(re.findall("FORWARDED", stdout))

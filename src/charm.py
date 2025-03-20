@@ -36,10 +36,9 @@ from ops.model import (
 from pydantic import ValidationError
 
 from cilium_manifests import CiliumManifests
+from cilium_validators import TunnelEncapsulationProtocol
 from hubble_manifests import HubbleManifests
 from metrics_validator import HubbleMetrics
-from cilium_validators import TunnelEncapsulationProtocol
-
 
 log = logging.getLogger(__name__)
 
@@ -138,10 +137,10 @@ class CiliumCharm(CharmBase):
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
 
         log.info("Applying Cilium manifests")
-            
+
         self._configure_hubble(event)
         self._configure_cilium_cni(event)
-        
+
     def _configure_cilium_cni(self, event):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
@@ -159,7 +158,7 @@ class CiliumCharm(CharmBase):
             self.unit.status = BlockedStatus(f"Invalid Cilium configuration: {key}")
             log.exception(errors)
             return
-        
+
     def _configure_cni_relation(self):
         self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
