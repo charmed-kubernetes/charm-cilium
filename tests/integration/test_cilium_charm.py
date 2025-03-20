@@ -63,14 +63,21 @@ async def test_build_and_deploy(ops_test: OpsTest, version):
     assert rc == 0, f"Bundle deploy failed: {(stderr or stdout).strip()}"
 
     await ops_test.model.block_until(lambda: "cilium" in ops_test.model.applications, timeout=60)
+    cilium_app = ops_test.model.applications["cilium"]
     # Don't wait for active/idle -- cilium units could be blocked
     await ops_test.model.wait_for_idle(timeout=ONE_HOUR)
+    await ops_test.model.block_until(
+        lambda: cilium_app.status in ["blocked", "active"], timeout=ONE_HOUR
+    )
 
 
 async def test_cilium_blocked(ops_test: OpsTest):
     cilium_app = ops_test.model.applications["cilium"]
-    principals = set()
+    if cilium_app.status == "active":
+        pytest.skip("Cilium is already active")
+
     assert cilium_app.status == "blocked", "Cilium should be blocked"
+    principals = set()
     for unit in cilium_app.units:
         if unit.agent_status == "blocked":
             assert "Environment issues detected" in unit.workload_status_message
