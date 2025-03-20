@@ -13,8 +13,6 @@ from pathlib import Path
 from subprocess import check_output
 from tarfile import TarError
 from typing import List, Mapping
-from pyroute2 import IPRoute
-
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import (
@@ -36,6 +34,7 @@ from ops.model import (
     WaitingStatus,
 )
 from pydantic import ValidationError
+from pyroute2 import IPRoute
 
 from cilium_manifests import CiliumManifests
 from cilium_validators import TunnelEncapsulation
@@ -388,12 +387,11 @@ class CiliumCharm(CharmBase):
         try:
             idx = ip.link_lookup(ifname="cilium_vxlan")
             if idx:
-                ip.link('del', index=idx[0])
+                ip.link("del", index=idx[0])
         except Exception as e:
             print(f"Error in removing the cilium interface: {e}")
         finally:
             ip.close()
-
 
     def _environment_issues(self) -> List[str]:
         """Check for environment issues and return a list of issues."""
@@ -414,17 +412,21 @@ class CiliumCharm(CharmBase):
 
     def _is_vxlan_port_reused_by_fan(self) -> bool:
         log.info(f"checking for validity of vxlan tunnel on port {self.stored.cilium_tunnel_port}")
-        
-        ps_number_using_vxlan_dst_port = 0 
+
+        ps_number_using_vxlan_dst_port = 0
         ip = IPRoute()
         links = ip.get_links()
-    
+
         for link in links:
-            attrs = dict(link['attrs'])
-            info_data = dict(attrs.get('IFLA_LINKINFO', {}).get('attrs', {})).get('IFLA_INFO_DATA', {})
-            info_data_attrs = dict(info_data.get('attrs', {}))
-            if str(info_data_attrs.get('IFLA_VXLAN_PORT')) == self.stored.cilium_tunnel_port:
-                log.info(f'interface {attrs.get("IFLA_IFNAME")} is using port {self.stored.cilium_tunnel_port}')
+            attrs = dict(link["attrs"])
+            info_data = dict(attrs.get("IFLA_LINKINFO", {}).get("attrs", {})).get(
+                "IFLA_INFO_DATA", {}
+            )
+            info_data_attrs = dict(info_data.get("attrs", {}))
+            if str(info_data_attrs.get("IFLA_VXLAN_PORT")) == self.stored.cilium_tunnel_port:
+                log.info(
+                    f'interface {attrs.get("IFLA_IFNAME")} is using port {self.stored.cilium_tunnel_port}'
+                )
                 ps_number_using_vxlan_dst_port += 1
 
         ip.close()
@@ -440,7 +442,7 @@ class CiliumCharm(CharmBase):
             )
             log.error("Environment issues:\n%s\n", "\n  -".join(issues))
             return
-        
+
         if not self.stored.cilium_configured:
             return
 
