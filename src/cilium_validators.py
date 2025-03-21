@@ -25,8 +25,11 @@ class TunnelEncapsulation(BaseModel):
     @validator("tunnel_port")
     def validate_tunnel_port(cls, v, values):
         """Decide which tunnel encapsulation port to use."""
+        if "tunnel_protocol" not in values:
+            return v
+
         if not v:
-            return protocols[values.get("tunnel_protocol")]
+            return protocols[values["tunnel_protocol"]]
 
         if not v.isdigit():
             raise ValueError(f"{v} is not a valid port number (must be an integer).")
