@@ -67,9 +67,9 @@ options:
   tunnel-port:
     type: string
     description: |
-      The defaults based on the tunnelling-mode will be selected:
+      Determines the port used for tunnel encapsulation.
+      Default ports are assigned based on the `tunnel-protocol` config option:
+        - VXLAN: port 8472
+        - Geneve: port 6081
         
-      vxlan will use port 8472
-      geneve will use port 6081
-        
-      if set, the user configured port will be used over the default
+      If set, the user configured port will be used over the default.

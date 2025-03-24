@@ -385,15 +385,13 @@ class CiliumCharm(CharmBase):
         return template.render(**kwargs)
 
     def _remove_cilium_vxlan(self) -> None:
-        ip = IPRoute()
-        try:
-            idx = ip.link_lookup(ifname="cilium_vxlan")
-            if idx:
-                ip.link("del", index=idx[0])
-        except Exception as e:
-            print(f"Error in removing the cilium interface: {e}")
-        finally:
-            ip.close()
+        with IPRoute() as ip:
+            try:
+                idx = ip.link_lookup(ifname="cilium_vxlan")
+                if len(idx) > 0:
+                    ip.link("del", index=idx[0])
+            except Exception:
+                log.exception("Error in removing the cilium interface")
 
     def _environment_issues(self) -> List[str]:
         """Check for environment issues and return a list of issues."""
@@ -416,26 +414,23 @@ class CiliumCharm(CharmBase):
         log.info(f"checking for validity of vxlan tunnel on port {self.stored.cilium_tunnel_port}")
 
         ps_number_using_vxlan_dst_port = 0
-        ip = IPRoute()
-        links = ip.get_links()
+        
+        with IPRoute() as ip:
+            links = ip.get_links()
 
-        for link in links:
-            attrs = dict(link["attrs"])
-            info_data = dict(attrs.get("IFLA_LINKINFO", {}).get("attrs", {})).get(
-                "IFLA_INFO_DATA", {}
-            )
-            info_data_attrs = dict(info_data.get("attrs", {}))
-            if str(info_data_attrs.get("IFLA_VXLAN_PORT")) == self.stored.cilium_tunnel_port:
-                log.info(
-                    f'interface {attrs.get("IFLA_IFNAME")} is using port {self.stored.cilium_tunnel_port}'
+            for link in links:
+                attrs = dict(link["attrs"])
+                info_data = dict(attrs.get("IFLA_LINKINFO", {}).get("attrs", {})).get(
+                    "IFLA_INFO_DATA", {}
                 )
-                ps_number_using_vxlan_dst_port += 1
+                info_data_attrs = dict(info_data.get("attrs", {}))
+                if str(info_data_attrs.get("IFLA_VXLAN_PORT")) == self.stored.cilium_tunnel_port:
+                    log.info(
+                        f'interface {attrs.get("IFLA_IFNAME")} is using port {self.stored.cilium_tunnel_port}'
+                    )
+                    ps_number_using_vxlan_dst_port += 1
 
-        ip.close()
-
-        if ps_number_using_vxlan_dst_port > 1:
-            return True
-        return False
+        return ps_number_using_vxlan_dst_port > 1
 
     def _set_active_status(self):
         if issues := self._environment_issues():
