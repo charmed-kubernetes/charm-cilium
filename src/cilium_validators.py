@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, validator
 
-PROTOCOLS = {"vxlan": "8472", "geneve": "6081"}
+PROTOCOL_DEFAULT_PORTS = {"vxlan": "8472", "geneve": "6081"}
 
 
 class TunnelEncapsulation(BaseModel):
@@ -16,7 +16,7 @@ class TunnelEncapsulation(BaseModel):
     @validator("tunnel_protocol")
     def validate_tunnel_protocol(cls, v):
         """Check that the value provided as tunnel protocol are in the allowed values."""
-        allowed_values = set(PROTOCOLS.keys())
+        allowed_values = set(PROTOCOL_DEFAULT_PORTS.keys())
 
         if v not in allowed_values:
             raise ValueError(f"{v} is not an allowed Cilium tunnel encapsulation protocol.")
@@ -29,7 +29,7 @@ class TunnelEncapsulation(BaseModel):
             return v
 
         if not v:
-            return PROTOCOLS[values["tunnel_protocol"]]
+            return PROTOCOL_DEFAULT_PORTS[values["tunnel_protocol"]]
 
         if not v.isdigit():
             raise ValueError(f"{v} is not a valid port number (must be an integer).")

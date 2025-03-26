@@ -405,12 +405,12 @@ class CiliumCharm(CharmBase):
                 )
                 issues.append("sysctl rp_filter enabled for interfaces.")
 
-        if self.stored.cilium_tunnel_protocol == "vxlan" and self._is_vxlan_port_reused_by_fan():
+        if self.stored.cilium_tunnel_protocol == "vxlan" and self._vxlan_port_already_in_use():
             issues.append("vxlan dst port is already in use. Set another tunnel-port.")
 
         return issues
 
-    def _is_vxlan_port_reused_by_fan(self) -> bool:
+    def _vxlan_port_already_in_use(self) -> bool:
         log.info(f"checking for validity of vxlan tunnel on port {self.stored.cilium_tunnel_port}")
 
         ps_number_using_vxlan_dst_port = 0
