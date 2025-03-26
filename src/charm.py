@@ -8,9 +8,10 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import traceback
 from functools import cached_property
 from pathlib import Path
-from subprocess import check_output
+from subprocess import CalledProcessError, check_output
 from tarfile import TarError
 from typing import List, Mapping
 
@@ -70,6 +71,7 @@ class CiliumCharm(CharmBase):
             hubble_configured=False,
             hubble_mismatch_config=False,
             unallowed_metrics=False,
+            cilium_restart_needed=False,
             cilium_tunnel_protocol=None,
             cilium_tunnel_port=None,
         )
@@ -127,21 +129,43 @@ class CiliumCharm(CharmBase):
         elif not rc:
             self.unit.status = WaitingStatus(waiting_msg)
 
+    def kubectl(self, *args):
+        cmd = ["kubectl", "--kubeconfig", "/root/.kube/config"] + list(args)
+        return check_output(cmd)
+
     @cached_property
     def _client(self) -> Client:
         """Lightkube Client instance."""
         client = Client(field_manager=f"{self.model.app.name}")
         return client
 
+    def _restart_resource(self, resource, namespace="kube-system"):
+        self.kubectl("rollout", "restart", resource, "-n", namespace)
+
+    def _check_if_cilium_restart_will_be_needed(self):
+        if not self.unit.is_leader():
+            return
+        
+        self.stored.cilium_restart_needed = True
+        output = self.kubectl(
+            "get",
+            "daemonset",
+            "-n",
+            "kube-system",
+            "cilium",
+            "--ignore-not-found",
+            "-o",
+            "json",
+        )
+        if not output:
+            # cilium daemonset doesn't exist, so this is a first time deployment
+            self.stored.cilium_restart_needed = False
+    
     def _configure_cilium(self, event):
         self.stored.cilium_configured = False
 
         if not self._get_kubeconfig_status():
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
-
-        # updating Cilium tunnel-port doesn't create a new vxlan interface unless we remove
-        # the previous one first
-        self._remove_cilium_vxlan()
 
         log.info("Applying Cilium manifests")
 
@@ -150,6 +174,7 @@ class CiliumCharm(CharmBase):
 
     def _configure_cilium_cni(self, event):
         try:
+            self._check_if_cilium_restart_will_be_needed()
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
             self.cilium_manifests.service_cidr = self._get_service_cidr()
             cilium_tunnel = TunnelEncapsulation(
@@ -159,8 +184,17 @@ class CiliumCharm(CharmBase):
             self.stored.cilium_tunnel_port = cilium_tunnel.tunnel_port
             self.stored.cilium_tunnel_protocol = cilium_tunnel.tunnel_protocol
             self.cilium_manifests.apply_manifests()
+
+            if self.stored.cilium_restart_needed:
+                try:
+                    self._restart_resource("daemonset/cilium")
+                except (CalledProcessError):
+                    log.exception("Failed to restart Cilium")
+
+
             self.stored.cilium_configured = True
-        except (ManifestClientError, ConnectError):
+        except (CalledProcessError, ManifestClientError, ConnectError):
+            log.error(traceback.format_exc())
             return self._ops_wait_for(
                 event, "Waiting to retry Cilium configuration.", exc_info=True
             )
@@ -270,7 +304,7 @@ class CiliumCharm(CharmBase):
             service_path = Path("/etc/systemd/system")
             shutil.copy(service_file_path, service_path)
             subprocess.check_call(["systemctl", "daemon-reload"])
-        except subprocess.CalledProcessError:
+        except CalledProcessError:
             log.exception("Failed to reload systemd daemons.")
         except OSError:
             log.exception("Destination folder: {service_path} is not writable.")
@@ -285,7 +319,7 @@ class CiliumCharm(CharmBase):
                 subprocess.check_call(["systemctl", "stop", PORT_FORWARD_SERVICE])
 
             self.unit.status = WaitingStatus("Waiting Hubble port-forward service.")
-        except subprocess.CalledProcessError:
+        except CalledProcessError:
             log.exception(f"Failed to modify {PORT_FORWARD_SERVICE} service")
 
     def _on_config_changed(self, event):
@@ -383,15 +417,6 @@ class CiliumCharm(CharmBase):
     def _render_template(self, filename, **kwargs):
         template = self.jinja2_env.get_template(filename)
         return template.render(**kwargs)
-
-    def _remove_cilium_vxlan(self) -> None:
-        with IPRoute() as ip:
-            try:
-                idx = ip.link_lookup(ifname="cilium_vxlan")
-                if len(idx) > 0:
-                    ip.link("del", index=idx[0])
-            except Exception:
-                log.exception("Error in removing the cilium interface")
 
     def _environment_issues(self) -> List[str]:
         """Check for environment issues and return a list of issues."""
