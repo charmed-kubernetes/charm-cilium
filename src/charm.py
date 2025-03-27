@@ -71,13 +71,12 @@ class CiliumCharm(CharmBase):
             hubble_configured=False,
             hubble_mismatch_config=False,
             unallowed_metrics=False,
-            cilium_restart_needed=False,
             cilium_tunnel_protocol=None,
             cilium_tunnel_port=None,
         )
 
         self.hubble_metrics: List[str] = []
-        self.cilium_manifests = CiliumManifests(self, self.config, self.hubble_metrics)
+        self.cilium_manifests = CiliumManifests(self, self.config, self.hubble_metrics, self._client)
         self.hubble_manifests = HubbleManifests(self, self.config)
         self.collector = Collector(self.cilium_manifests, self.hubble_manifests)
 
@@ -129,38 +128,12 @@ class CiliumCharm(CharmBase):
         elif not rc:
             self.unit.status = WaitingStatus(waiting_msg)
 
-    def kubectl(self, *args):
-        cmd = ["kubectl", "--kubeconfig", "/root/.kube/config"] + list(args)
-        return check_output(cmd)
-
     @cached_property
     def _client(self) -> Client:
         """Lightkube Client instance."""
         client = Client(field_manager=f"{self.model.app.name}")
         return client
 
-    def _restart_resource(self, resource, namespace="kube-system"):
-        self.kubectl("rollout", "restart", resource, "-n", namespace)
-
-    def _check_if_cilium_restart_will_be_needed(self):
-        if not self.unit.is_leader():
-            return
-        
-        self.stored.cilium_restart_needed = True
-        output = self.kubectl(
-            "get",
-            "daemonset",
-            "-n",
-            "kube-system",
-            "cilium",
-            "--ignore-not-found",
-            "-o",
-            "json",
-        )
-        if not output:
-            # cilium daemonset doesn't exist, so this is a first time deployment
-            self.stored.cilium_restart_needed = False
-    
     def _configure_cilium(self, event):
         self.stored.cilium_configured = False
 
@@ -174,7 +147,6 @@ class CiliumCharm(CharmBase):
 
     def _configure_cilium_cni(self, event):
         try:
-            self._check_if_cilium_restart_will_be_needed()
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
             self.cilium_manifests.service_cidr = self._get_service_cidr()
             cilium_tunnel = TunnelEncapsulation(
@@ -183,17 +155,10 @@ class CiliumCharm(CharmBase):
             )
             self.stored.cilium_tunnel_port = cilium_tunnel.tunnel_port
             self.stored.cilium_tunnel_protocol = cilium_tunnel.tunnel_protocol
-            self.cilium_manifests.apply_manifests()
-
-            if self.stored.cilium_restart_needed:
-                try:
-                    self._restart_resource("daemonset/cilium")
-                except (CalledProcessError):
-                    log.exception("Failed to restart Cilium")
-
-
+            with self.cilium_manifests.restart_if_exists():
+                self.cilium_manifests.apply_manifests()
             self.stored.cilium_configured = True
-        except (CalledProcessError, ManifestClientError, ConnectError):
+        except (ManifestClientError, ConnectError):
             log.error(traceback.format_exc())
             return self._ops_wait_for(
                 event, "Waiting to retry Cilium configuration.", exc_info=True
