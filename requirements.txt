@@ -1,4 +1,5 @@
 ops >= 1.5.0
+cosl
 lightkube
 ops.manifest >= 1.1.0
 Jinja2
