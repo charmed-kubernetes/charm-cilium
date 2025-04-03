@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-import traceback
 from functools import cached_property
 from pathlib import Path
 from subprocess import CalledProcessError, check_output
@@ -76,9 +75,7 @@ class CiliumCharm(CharmBase):
         )
 
         self.hubble_metrics: List[str] = []
-        self.cilium_manifests = CiliumManifests(
-            self, self.config, self.hubble_metrics, self._client
-        )
+        self.cilium_manifests = CiliumManifests(self, self.config, self.hubble_metrics)
         self.hubble_manifests = HubbleManifests(self, self.config)
         self.collector = Collector(self.cilium_manifests, self.hubble_manifests)
 
@@ -161,7 +158,7 @@ class CiliumCharm(CharmBase):
                 self.cilium_manifests.apply_manifests()
             self.stored.cilium_configured = True
         except (ManifestClientError, ConnectError):
-            log.error(traceback.format_exc())
+            log.exception("Encountered error configuring cilium")
             return self._ops_wait_for(
                 event, "Waiting to retry Cilium configuration.", exc_info=True
             )

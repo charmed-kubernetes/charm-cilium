@@ -9,7 +9,6 @@ import httpx
 from pyroute2 import IPRoute
 from typing import Dict, Optional
 
-from lightkube import Client
 from lightkube.resources.apps_v1 import DaemonSet
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
 
@@ -169,11 +168,9 @@ class CiliumManifests(Manifests):
         charm,
         charm_config,
         hubble_metrics,
-        client: Client,
         service_cidr: Optional[str] = None,
     ):
         self.service_cidr = service_cidr
-        self._client = client
         manipulations = [
             ConfigRegistry(self),
             ManifestLabel(self),
@@ -220,7 +217,7 @@ class CiliumManifests(Manifests):
     def restart_if_exists(self):
         ciliumDS = None
         try:
-            ciliumDS = self._client.get(DaemonSet, name="cilium", namespace="kube-system")
+            ciliumDS = self.client.get(DaemonSet, name="cilium", namespace="kube-system")
         except httpx.ConnectTimeout:
             pass
 
@@ -247,4 +244,4 @@ class CiliumManifests(Manifests):
             }
         }
 
-        self._client.patch(DaemonSet, name="cilium", namespace="kube-system", obj=patch)
+        self.client.patch(DaemonSet, name="cilium", namespace="kube-system", obj=patch)
