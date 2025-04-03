@@ -162,7 +162,14 @@ class PatchCiliumTunnel(Patch):
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
 
-    def __init__(self, charm, charm_config, hubble_metrics, client: Client, service_cidr: Optional[str] = None):
+    def __init__(
+        self,
+        charm,
+        charm_config,
+        hubble_metrics,
+        client: Client,
+        service_cidr: Optional[str] = None,
+    ):
         self.service_cidr = service_cidr
         self._client = client
         manipulations = [
@@ -208,26 +215,22 @@ class CiliumManifests(Manifests):
         return hash.hexdigest()
 
     @contextlib.contextmanager
-    def restart_if_exists(self): 
+    def restart_if_exists(self):
         ciliumDS = self._client.get(DaemonSet, name="cilium", namespace="kube-system")
 
         yield
-        
+
         if not ciliumDS:
             return
-        
+
         now = datetime.datetime.now()
         now = str(now.isoformat("T") + "Z")
         patch = {
-        'spec': {
-            'template':{
-                'metadata': {
-                    'annotations': {
-                        'kubectl.kubernetes.io/restartedAt': now
-                    }
+            "spec": {
+                "template": {
+                    "metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}
                 }
             }
         }
-    }
 
         self._client.patch(DaemonSet, name="cilium", namespace="kube-system", obj=patch)

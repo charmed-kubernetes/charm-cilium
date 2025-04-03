@@ -76,7 +76,9 @@ class CiliumCharm(CharmBase):
         )
 
         self.hubble_metrics: List[str] = []
-        self.cilium_manifests = CiliumManifests(self, self.config, self.hubble_metrics, self._client)
+        self.cilium_manifests = CiliumManifests(
+            self, self.config, self.hubble_metrics, self._client
+        )
         self.hubble_manifests = HubbleManifests(self, self.config)
         self.collector = Collector(self.cilium_manifests, self.hubble_manifests)
 
@@ -404,7 +406,7 @@ class CiliumCharm(CharmBase):
         log.info(f"checking for validity of vxlan tunnel on port {self.stored.cilium_tunnel_port}")
 
         ps_number_using_vxlan_dst_port = 0
-        
+
         with IPRoute() as ip:
             links = ip.get_links()
 
@@ -416,7 +418,7 @@ class CiliumCharm(CharmBase):
                 info_data_attrs = dict(info_data.get("attrs", {}))
                 if str(info_data_attrs.get("IFLA_VXLAN_PORT")) == self.stored.cilium_tunnel_port:
                     log.info(
-                        f'interface {attrs.get("IFLA_IFNAME")} is using port {self.stored.cilium_tunnel_port}'
+                        f"interface {attrs.get('IFLA_IFNAME')} is using port {self.stored.cilium_tunnel_port}"
                     )
                     ps_number_using_vxlan_dst_port += 1
 

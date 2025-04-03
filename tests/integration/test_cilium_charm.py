@@ -90,10 +90,11 @@ async def test_cilium_blocked(ops_test: OpsTest):
         await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
     assert cilium_app.status == "active", "Cilium should be active"
 
+
 async def test_cilium_tunnel_port(ops_test: OpsTest):
     cilium_app = ops_test.model.applications["cilium"]
     cilium = cilium_app.units[0]
-    
+
     await cilium_app.set_config({"tunnel-port": "8473"})
     async with ops_test.fast_forward("30s"):
         await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
@@ -106,6 +107,7 @@ async def test_cilium_tunnel_port(ops_test: OpsTest):
     )
     stdout = action.results.get("stdout")
     assert "dstport 8473" in stdout
+
 
 async def test_cilium_tunnel_protocol(ops_test: OpsTest):
     cilium_app = ops_test.model.applications["cilium"]
@@ -121,6 +123,7 @@ async def test_cilium_tunnel_protocol(ops_test: OpsTest):
     async with ops_test.fast_forward("30s"):
         await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
     assert cilium_app.status == "active", "Cilium should be active"
+
 
 async def test_cli_resources(ops_test: OpsTest):
     units = ops_test.model.applications["cilium"].units
