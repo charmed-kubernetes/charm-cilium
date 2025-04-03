@@ -5,6 +5,7 @@ import json
 import logging
 import contextlib
 import datetime
+import httpx
 from typing import Dict, Optional
 
 from lightkube import Client
@@ -216,7 +217,11 @@ class CiliumManifests(Manifests):
 
     @contextlib.contextmanager
     def restart_if_exists(self):
-        ciliumDS = self._client.get(DaemonSet, name="cilium", namespace="kube-system")
+        ciliumDS = None
+        try:
+            ciliumDS = self._client.get(DaemonSet, name="cilium", namespace="kube-system")
+        except httpx.ConnectTimeout:
+            pass
 
         yield
 
