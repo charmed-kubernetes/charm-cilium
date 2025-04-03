@@ -6,6 +6,7 @@ import logging
 import contextlib
 import datetime
 import httpx
+from pyroute2 import IPRoute
 from typing import Dict, Optional
 
 from lightkube import Client
@@ -227,6 +228,14 @@ class CiliumManifests(Manifests):
 
         if not ciliumDS:
             return
+
+        with IPRoute() as ip:
+            try:
+                idx = ip.link_lookup(ifname="cilium_vxlan")
+                if len(idx) > 0:
+                    ip.link("del", index=idx[0])
+            except Exception:
+                log.exception("Error in removing the cilium interface")
 
         now = datetime.datetime.now()
         now = str(now.isoformat("T") + "Z")
