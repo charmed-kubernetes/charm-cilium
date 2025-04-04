@@ -4,8 +4,8 @@ import hashlib
 import json
 import logging
 import contextlib
-import datetime
 import httpx
+from datetime import datetime, timezone
 from pyroute2 import IPRoute
 from typing import Dict, Optional
 
@@ -227,6 +227,12 @@ class CiliumManifests(Manifests):
         if not ciliumDS:
             return
 
+        # Note(Reza): Currently Cilium tries to bring up the vxlan interface before applying
+        # any configuration changes. If the Cilium vxlan interface has any conflicts with other
+        # interfaces that makes it unable to brought up, Cilium fails to apply configuration
+        # changes. Removing the interface before applying the new manifests is a temporary
+        # workaround. We can remove this context when the following issue gets settled:
+        # https://github.com/cilium/cilium/issues/38581
         with IPRoute() as ip:
             try:
                 idx = ip.link_lookup(ifname="cilium_vxlan")
@@ -235,8 +241,7 @@ class CiliumManifests(Manifests):
             except Exception:
                 log.exception("Error in removing the cilium interface")
 
-        now = datetime.datetime.now()
-        now = str(now.isoformat("T") + "Z")
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         patch = {
             "spec": {
                 "template": {
