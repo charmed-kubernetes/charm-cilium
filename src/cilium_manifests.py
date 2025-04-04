@@ -3,8 +3,14 @@
 import hashlib
 import json
 import logging
+import contextlib
+import httpx
+from datetime import datetime, timezone
+from pyroute2 import IPRoute
 from typing import Dict, Optional
 
+from lightkube.core.exceptions import ApiError
+from lightkube.resources.apps_v1 import DaemonSet
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
 
 log = logging.getLogger(__name__)
@@ -134,15 +140,12 @@ class SetIPv4CIDR(Patch):
         data["cluster-pool-ipv4-mask-size"] = self.manifests.config["cluster-pool-ipv4-mask-size"]
 
 
-class PatchTunnelProtocol(Patch):
-    """Configure Network tunnel Encapsulation protocol."""
+class PatchCiliumTunnel(Patch):
+    """Configure Cilium network tunnel encapsulation settings."""
 
     def __call__(self, obj) -> None:
-        """Update Cilium tunnel encapsulation protocol."""
+        """Update Cilium tunnel encapsulation settings."""
         if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
-            return
-
-        if not self.manifests.config["tunnel-protocol"]:
             return
 
         log.info(f"Patching cilium tunnel protocol: {self.manifests.config['tunnel-protocol']}")
@@ -150,11 +153,24 @@ class PatchTunnelProtocol(Patch):
         data = obj.data
         data["tunnel-protocol"] = self.manifests.config["tunnel-protocol"]
 
+        if not self.manifests.config.get("tunnel-port"):
+            return
+
+        log.info(f"Patching cilium tunnel port: {self.manifests.config['tunnel-port']}")
+
+        data["tunnel-port"] = self.manifests.config["tunnel-port"]
+
 
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
 
-    def __init__(self, charm, charm_config, hubble_metrics, service_cidr: Optional[str] = None):
+    def __init__(
+        self,
+        charm,
+        charm_config,
+        hubble_metrics,
+        service_cidr: Optional[str] = None,
+    ):
         self.service_cidr = service_cidr
         manipulations = [
             ConfigRegistry(self),
@@ -165,7 +181,7 @@ class CiliumManifests(Manifests):
             PatchPrometheusConfigMap(self),
             PatchHubbleMetricsConfigMap(self),
             SetIPv4CIDR(self),
-            PatchTunnelProtocol(self),
+            PatchCiliumTunnel(self),
         ]
 
         super().__init__("cilium", charm.model, "upstream/cilium", manipulations)
@@ -197,3 +213,41 @@ class CiliumManifests(Manifests):
         hash = hashlib.sha256()
         hash.update(json_str.encode())
         return hash.hexdigest()
+
+    @contextlib.contextmanager
+    def restart_if_exists(self):
+        ciliumDS = None
+        try:
+            ciliumDS = self.client.get(DaemonSet, name="cilium", namespace="kube-system")
+        except (ApiError, httpx.ConnectTimeout):
+            pass
+
+        yield
+
+        if not ciliumDS:
+            return
+
+        # Note(Reza): Currently Cilium tries to bring up the vxlan interface before applying
+        # any configuration changes. If the Cilium vxlan interface has any conflicts with other
+        # interfaces that makes it unable to brought up, Cilium fails to apply configuration
+        # changes. Removing the interface before applying the new manifests is a temporary
+        # workaround. We can remove this context when the following issue gets settled:
+        # https://github.com/cilium/cilium/issues/38581
+        with IPRoute() as ip:
+            try:
+                idx = ip.link_lookup(ifname="cilium_vxlan")
+                if len(idx) > 0:
+                    ip.link("del", index=idx[0])
+            except Exception:
+                log.exception("Error in removing the cilium interface")
+
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        patch = {
+            "spec": {
+                "template": {
+                    "metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}
+                }
+            }
+        }
+
+        self.client.patch(DaemonSet, name="cilium", namespace="kube-system", obj=patch)

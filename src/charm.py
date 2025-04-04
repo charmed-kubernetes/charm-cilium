@@ -10,7 +10,7 @@ import tarfile
 import tempfile
 from functools import cached_property
 from pathlib import Path
-from subprocess import check_output
+from subprocess import CalledProcessError, check_output
 from tarfile import TarError
 from typing import List, Mapping
 
@@ -34,9 +34,10 @@ from ops.model import (
     WaitingStatus,
 )
 from pydantic import ValidationError
+from pyroute2 import IPRoute
 
 from cilium_manifests import CiliumManifests
-from cilium_validators import TunnelEncapsulationProtocol
+from cilium_validators import TunnelEncapsulation
 from hubble_manifests import HubbleManifests
 from metrics_validator import HubbleMetrics
 
@@ -69,6 +70,8 @@ class CiliumCharm(CharmBase):
             hubble_configured=False,
             hubble_mismatch_config=False,
             unallowed_metrics=False,
+            cilium_tunnel_protocol=None,
+            cilium_tunnel_port=None,
         )
 
         self.hubble_metrics: List[str] = []
@@ -145,10 +148,17 @@ class CiliumCharm(CharmBase):
         try:
             self.unit.status = MaintenanceStatus("Applying Cilium resources.")
             self.cilium_manifests.service_cidr = self._get_service_cidr()
-            TunnelEncapsulationProtocol(tunnel_protocol=self.model.config["tunnel-protocol"])
-            self.cilium_manifests.apply_manifests()
+            cilium_tunnel = TunnelEncapsulation(
+                tunnel_protocol=self.model.config.get("tunnel-protocol"),
+                tunnel_port=self.model.config.get("tunnel-port"),
+            )
+            self.stored.cilium_tunnel_port = cilium_tunnel.tunnel_port
+            self.stored.cilium_tunnel_protocol = cilium_tunnel.tunnel_protocol
+            with self.cilium_manifests.restart_if_exists():
+                self.cilium_manifests.apply_manifests()
             self.stored.cilium_configured = True
         except (ManifestClientError, ConnectError):
+            log.exception("Encountered error configuring cilium")
             return self._ops_wait_for(
                 event, "Waiting to retry Cilium configuration.", exc_info=True
             )
@@ -258,7 +268,7 @@ class CiliumCharm(CharmBase):
             service_path = Path("/etc/systemd/system")
             shutil.copy(service_file_path, service_path)
             subprocess.check_call(["systemctl", "daemon-reload"])
-        except subprocess.CalledProcessError:
+        except CalledProcessError:
             log.exception("Failed to reload systemd daemons.")
         except OSError:
             log.exception("Destination folder: {service_path} is not writable.")
@@ -273,7 +283,7 @@ class CiliumCharm(CharmBase):
                 subprocess.check_call(["systemctl", "stop", PORT_FORWARD_SERVICE])
 
             self.unit.status = WaitingStatus("Waiting Hubble port-forward service.")
-        except subprocess.CalledProcessError:
+        except CalledProcessError:
             log.exception(f"Failed to modify {PORT_FORWARD_SERVICE} service")
 
     def _on_config_changed(self, event):
@@ -375,6 +385,7 @@ class CiliumCharm(CharmBase):
     def _environment_issues(self) -> List[str]:
         """Check for environment issues and return a list of issues."""
         issues = []
+
         if values := _sysctl_get("net.ipv4.conf.all.rp_filter"):
             if values["net.ipv4.conf.all.rp_filter"] != "0":
                 log.warning(
@@ -382,9 +393,42 @@ class CiliumCharm(CharmBase):
                     "net.ipv4.conf.all.rp_filter=0",
                 )
                 issues.append("sysctl rp_filter enabled for interfaces.")
+
+        if self.stored.cilium_tunnel_protocol == "vxlan" and self._vxlan_port_already_in_use():
+            issues.append("vxlan dst port is already in use. Set another tunnel-port.")
+
         return issues
 
+    def _vxlan_port_already_in_use(self) -> bool:
+        log.info(f"checking for validity of vxlan tunnel on port {self.stored.cilium_tunnel_port}")
+
+        ps_number_using_vxlan_dst_port = 0
+
+        with IPRoute() as ip:
+            links = ip.get_links()
+
+            for link in links:
+                attrs = dict(link["attrs"])
+                info_data = dict(attrs.get("IFLA_LINKINFO", {}).get("attrs", {})).get(
+                    "IFLA_INFO_DATA", {}
+                )
+                info_data_attrs = dict(info_data.get("attrs", {}))
+                if str(info_data_attrs.get("IFLA_VXLAN_PORT")) == self.stored.cilium_tunnel_port:
+                    log.info(
+                        f"interface {attrs.get('IFLA_IFNAME')} is using port {self.stored.cilium_tunnel_port}"
+                    )
+                    ps_number_using_vxlan_dst_port += 1
+
+        return ps_number_using_vxlan_dst_port > 1
+
     def _set_active_status(self):
+        if issues := self._environment_issues():
+            self.unit.status = BlockedStatus(
+                "Environment issues detected: check logs for details."
+            )
+            log.error("Environment issues:\n%s\n", "\n  -".join(issues))
+            return
+
         if not self.stored.cilium_configured:
             return
 
@@ -392,13 +436,6 @@ class CiliumCharm(CharmBase):
             return
 
         if self.stored.unallowed_metrics:
-            return
-
-        if issues := self._environment_issues():
-            self.unit.status = BlockedStatus(
-                "Environment issues detected: check logs for details."
-            )
-            log.error("Environment issues:\n%s\n", "\n  -".join(issues))
             return
 
         self.unit.status = ActiveStatus("Ready")
