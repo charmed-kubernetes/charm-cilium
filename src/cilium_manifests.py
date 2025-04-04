@@ -9,6 +9,7 @@ import httpx
 from pyroute2 import IPRoute
 from typing import Dict, Optional
 
+from lightkube.core.exceptions import ApiError
 from lightkube.resources.apps_v1 import DaemonSet
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
 
@@ -218,7 +219,7 @@ class CiliumManifests(Manifests):
         ciliumDS = None
         try:
             ciliumDS = self.client.get(DaemonSet, name="cilium", namespace="kube-system")
-        except httpx.ConnectTimeout:
+        except (ApiError, httpx.ConnectTimeout):
             pass
 
         yield
