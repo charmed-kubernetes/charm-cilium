@@ -16,28 +16,6 @@ from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
 log = logging.getLogger(__name__)
 
 
-class PatchHubbleMetricsConfigMap(Patch):
-    """Configure Hubble Prometheus metrics."""
-
-    def __call__(self, obj) -> None:
-        """Update hubble-metrics entry in cilium-config ConfigMap."""
-        if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
-            return
-
-        log.info(f"Patching hubble_metrics: {self.manifests.hubble_metrics}")
-
-        if not self.manifests.hubble_metrics:
-            return
-
-        data = obj.data
-        values = {
-            "hubble-metrics": " ".join(self.manifests.hubble_metrics),
-            "hubble-metrics-server": ":9965",
-        }
-        data.update(values)
-        log.info(f"Patching Hubble metrics [{self.manifests.hubble_metrics}]: {data}")
-
-
 class PatchCiliumOperatorAnnotations(Patch):
     """Configure Cilium-Operatior metrics expose."""
 
@@ -80,29 +58,6 @@ class PatchCiliumDaemonSetAnnotations(Patch):
         log.info(f"Metadata annotatd: {metadata}")
 
 
-class PatchPrometheusConfigMap(Patch):
-    """Configure Cilium Prometheus metrics."""
-
-    def __call__(self, obj) -> None:
-        """Update Cilium Components."""
-        if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
-            return
-
-        if not self.manifests.config["enable-cilium-metrics"]:
-            return
-
-        log.info("Patching Cilium ConfigMap Prometheus Values.")
-        values = {
-            "prometheus-serve-addr": ":9962",
-            "proxy-prometheus-port": "9964",
-            "operator-prometheus-serve-addr": ":9963",
-            "enable-metrics": "true",
-        }
-
-        data = obj.data
-        data.update(values)
-
-
 class PatchCDKOnRelationChange(Patch):
     """Patch Deployments/Daemonsets to be apart of cdk-restart-on-ca-change.
 
@@ -127,38 +82,48 @@ class PatchCDKOnRelationChange(Patch):
         }
 
 
-class SetIPv4CIDR(Patch):
-    """Configure IPv4 CIDR and Node Mask."""
+class PatchCiliumConfig(Patch):
+    """Configure Cilium ConfigMap."""
 
     def __call__(self, obj) -> None:
-        """Update ConfigMap IPv4 CIDR and Mask size."""
+        """Update Cilium ConfigMap."""
         if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
             return
 
+        log.info("Patching Cilium ConfigMap.")
         data = obj.data
         data["cluster-pool-ipv4-cidr"] = self.manifests.config["cluster-pool-ipv4-cidr"]
         data["cluster-pool-ipv4-mask-size"] = self.manifests.config["cluster-pool-ipv4-mask-size"]
 
+        if self.manifests.config["enable-cilium-metrics"]:
+            log.info("Patching Cilium ConfigMap Prometheus Values.")
+            values = {
+                "prometheus-serve-addr": ":9962",
+                "proxy-prometheus-port": "9964",
+                "operator-prometheus-serve-addr": ":9963",
+                "enable-metrics": "true",
+            }
+            data.update(values)
 
-class PatchCiliumTunnel(Patch):
-    """Configure Cilium network tunnel encapsulation settings."""
+        tunnel_prot = self.manifests.config["tunnel-protocol"]
+        log.info("Patching cilium tunnel protocol: %s", tunnel_prot)
+        data["tunnel-protocol"] = tunnel_prot
 
-    def __call__(self, obj) -> None:
-        """Update Cilium tunnel encapsulation settings."""
-        if not (obj.kind == "ConfigMap" and obj.metadata.name == "cilium-config"):
-            return
+        if tunnel_port := self.manifests.config.get("tunnel-port"):
+            log.info("Patching cilium tunnel port: %s", tunnel_port)
+            data["tunnel-port"] = tunnel_port
 
-        log.info(f"Patching cilium tunnel protocol: {self.manifests.config['tunnel-protocol']}")
+        if metrics := self.manifests.hubble_metrics:
+            values = {
+                "hubble-metrics": " ".join(metrics),
+                "hubble-metrics-server": ":9965",
+            }
+            data.update(values)
+            log.info("Patching Hubble metrics [%s]: %s", metrics, values)
 
-        data = obj.data
-        data["tunnel-protocol"] = self.manifests.config["tunnel-protocol"]
-
-        if not self.manifests.config.get("tunnel-port"):
-            return
-
-        log.info(f"Patching cilium tunnel port: {self.manifests.config['tunnel-port']}")
-
-        data["tunnel-port"] = self.manifests.config["tunnel-port"]
+        session_affinity = self.manifests.config.get("enable-session-affinity")
+        log.info("Patching cilium session-affinity: %s", session_affinity)
+        data["enable-session-affinity"] = session_affinity
 
 
 class CiliumManifests(Manifests):
@@ -178,10 +143,7 @@ class CiliumManifests(Manifests):
             PatchCDKOnRelationChange(self),
             PatchCiliumDaemonSetAnnotations(self),
             PatchCiliumOperatorAnnotations(self),
-            PatchPrometheusConfigMap(self),
-            PatchHubbleMetricsConfigMap(self),
-            SetIPv4CIDR(self),
-            PatchCiliumTunnel(self),
+            PatchCiliumConfig(self),
         ]
 
         super().__init__("cilium", charm.model, "upstream/cilium", manipulations)

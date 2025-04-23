@@ -34,11 +34,16 @@ options:
     default: ""
     description: |
       Expose Prometheus metrics for the Hubble Observability components.
-      
+
       The configuration value should include the desired values to scrape from
       Hubble in a space separated list.
       For more information about configuring this value, please visit:
         https://docs.cilium.io/en/latest/observability/metrics/#hubble-exported-metrics
+  enable-session-affinity:
+    type: boolean
+    default: false
+    description: |
+      Enable session affinity for Cilium.
   image-registry:
     default: rocks.canonical.com:443/cdk
     type: string
@@ -55,12 +60,12 @@ options:
     description: Version of Cilium to deploy
     type: string
   tunnel-protocol:
-    type: string 
+    type: string
     default: vxlan
-    description: | 
+    description: |
       Type of Cilium tunnel encapsulation protocol.
-      The default encapsulation protocol is vxlan. 
-      
+      The default encapsulation protocol is vxlan.
+
       valid options are:
           * vxlan
           * geneve
@@ -71,5 +76,5 @@ options:
       Default ports are assigned based on the `tunnel-protocol` config option:
         - VXLAN: port 8472
         - Geneve: port 6081
-        
+
       If set, the user configured port will be used over the default.
