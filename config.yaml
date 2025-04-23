@@ -44,6 +44,9 @@ options:
     default: false
     description: |
       Enable session affinity for Cilium.
+
+      For more information about configuring this value, please visit:
+         https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/#id2
   image-registry:
     default: rocks.canonical.com:443/cdk
     type: string

@@ -121,9 +121,9 @@ class PatchCiliumConfig(Patch):
             data.update(values)
             log.info("Patching Hubble metrics [%s]: %s", metrics, values)
 
-        session_affinity = self.manifests.config.get("enable-session-affinity")
-        log.info("Patching cilium session-affinity: %s", session_affinity)
-        data["enable-session-affinity"] = session_affinity
+        if session_affinity := self.manifests.config["enable-session-affinity"]:
+            log.info("Patching cilium session-affinity: %s", session_affinity)
+            data["enable-session-affinity"] = "true"
 
 
 class CiliumManifests(Manifests):
