@@ -18,7 +18,7 @@ from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import (
     PrometheusRemoteWriteConsumer,
 )
-from httpx import ConnectError, HTTPError
+from httpx import HTTPError
 from jinja2 import Environment, FileSystemLoader
 from lightkube import Client, codecs
 from lightkube.core.exceptions import ApiError
@@ -157,7 +157,7 @@ class CiliumCharm(CharmBase):
             with self.cilium_manifests.restart_if_exists():
                 self.cilium_manifests.apply_manifests()
             self.stored.cilium_configured = True
-        except (ManifestClientError, ConnectError):
+        except (ManifestClientError, ApiError, HTTPError):
             log.exception("Encountered error configuring cilium")
             return self._ops_wait_for(
                 event, "Waiting to retry Cilium configuration.", exc_info=True
@@ -183,7 +183,7 @@ class CiliumCharm(CharmBase):
                 self._configure_hubble_metrics()
                 self.hubble_manifests.apply_manifests()
                 self.stored.hubble_configured = True
-            except (ManifestClientError, ConnectError):
+            except (ManifestClientError, ApiError, HTTPError):
                 return self._ops_wait_for(
                     event, "Waiting to retry Hubble configuration.", exc_info=True
                 )
@@ -199,7 +199,7 @@ class CiliumCharm(CharmBase):
                 self.unit.status = MaintenanceStatus("Removing Hubble resources.")
                 self.hubble_manifests.delete_manifests()
                 self.stored.hubble_configured = False
-            except (ManifestClientError, ConnectError):
+            except (ManifestClientError, ApiError, HTTPError):
                 return self._ops_wait_for(event, "Waiting to retry Hubble removal.", exc_info=True)
 
     def _configure_hubble_metrics(self):
