@@ -21,7 +21,7 @@ SYSCTL = "{net.ipv4.conf.all.forwarding: 1, net.ipv4.conf.all.rp_filter: 0, net.
 
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy(ops_test: OpsTest, version):
+async def test_build_and_deploy(ops_test: OpsTest, version, sysctl_post_deploy):
     charm = next(Path(".").glob("cilium*.charm"), None)
     if not charm:
         log.info("Build charm...")
@@ -47,12 +47,16 @@ async def test_build_and_deploy(ops_test: OpsTest, version):
 
     overlays = [
         ops_test.Bundle("kubernetes-core", channel="edge"),
+        Path("tests/data/sysctl-overlay.yaml"),
         Path("tests/data/charm.yaml"),
         Path("tests/data/vsphere-overlay.yaml"),
     ]
 
     log.info("Rendering overlays...")
     bundle, *overlays = await ops_test.async_render_bundles(*overlays, **context)
+
+    if sysctl_post_deploy:
+        overlays = overlays[1:]
 
     log.info("Deploy charm...")
     model = ops_test.model_full_name

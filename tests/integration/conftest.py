@@ -38,11 +38,22 @@ def pytest_addoption(parser):
         default="1.16.10",
         help="Cilium version to deploy",
     )
+    parser.addoption(
+        "--sysctl-post-deploy",
+        action="store_true",
+        default=False,
+        help="Apply sysctl settings after deploying test model",
+    )
 
 
 @pytest.fixture
 def version(request):
     return request.config.getoption("--cilium-version")
+
+
+@pytest.fixture()
+def sysctl_post_deploy(request):
+    return request.config.getoption("--sysctl-post-deploy")
 
 
 @pytest.fixture(scope="module")
