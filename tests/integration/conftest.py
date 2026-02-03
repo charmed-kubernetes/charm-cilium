@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Tuple, Union
 
 import pytest
-from helpers import get_address
+from helpers import cloud_type, get_address
 from juju.tag import untag
 from kubernetes import config as k8s_config
 from kubernetes.client import Configuration
@@ -163,6 +163,12 @@ async def k8s_cloud(request, kubeconfig, ops_test: OpsTest):
 
 @pytest.fixture(scope="module")
 async def metallb_model(k8s_cloud, ops_test: OpsTest):
+    _type, _ = await cloud_type(ops_test)  # ensure cloud_type is cached before model creation
+    if _type == "ec2":
+        log.info("Skipping MetalLB model creation on AWS ...")
+        yield
+        return
+
     log.info("Creating MetalLB model ...")
 
     model_alias = "metallb-model"
@@ -185,6 +191,10 @@ async def metallb_model(k8s_cloud, ops_test: OpsTest):
 async def metallb_installed(request, metallb_model):
     ip_range = request.config.getoption("--metallb-iprange")
     log.info(f"Deploying MetalLB with IP range: {ip_range} ...")
+
+    if not metallb_model:
+        yield
+        return
 
     m = metallb_model
     charm = "metallb"
