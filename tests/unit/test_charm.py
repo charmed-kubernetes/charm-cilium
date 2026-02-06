@@ -114,7 +114,7 @@ def test_configure_cni_relation(harness, charm):
     relation = harness.model.relations["cni"][0]
     assert relation.data[charm.unit] == {
         "cidr": "10.0.0.0/24",
-        "cni-conf-file": "05-cilium.conf",
+        "cni-conf-file": "05-cilium.conflist",
     }
 
 

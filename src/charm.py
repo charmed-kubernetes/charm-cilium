@@ -174,7 +174,7 @@ class CiliumCharm(CharmBase):
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
         for r in self.model.relations["cni"]:
             r.data[self.unit]["cidr"] = cidr
-            r.data[self.unit]["cni-conf-file"] = "05-cilium.conf"
+            r.data[self.unit]["cni-conf-file"] = "05-cilium.conflist"
 
     def _configure_hubble(self, event):
         if self.model.config["enable-hubble"]:
