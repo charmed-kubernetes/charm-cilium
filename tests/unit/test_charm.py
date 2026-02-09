@@ -15,6 +15,29 @@ from ops.model import BlockedStatus, MaintenanceStatus, ModelError, WaitingStatu
 ops.testing.SIMULATE_CAN_CONNECT = True
 
 
+def test_config_file(tmp_path):
+    from charm import _config_file
+
+    # Test with no files
+    assert _config_file(tmp_path) is None
+
+    # Test with .conf file
+    conf_file = tmp_path / "05-cilium.conf"
+    conf_file.touch()
+    assert _config_file(tmp_path) == conf_file
+
+    # Test with .conflist file (should prefer the last one alphabetically)
+    conflist_file = tmp_path / "05-cilium.conflist"
+    conflist_file.touch()
+    assert _config_file(tmp_path) == conflist_file
+
+    # Test with multiple files (should return the last one sorted)
+    another_file = tmp_path / "10-cilium.conf"
+    another_file.touch()
+    result = _config_file(tmp_path)
+    assert result == another_file
+
+
 def test_arch(charm):
     expected_arch = "amd64"
     with mock.patch("charm.subprocess.check_output") as mock_check_output:
@@ -108,14 +131,16 @@ def test_configure_cni_relation(harness, charm):
     rel_id = harness.add_relation("cni", "kubernetes-control-plane")
     harness.add_relation_unit(rel_id, "kubernetes-control-plane/0")
 
-    charm._configure_cni_relation()
-    assert charm.unit.status == MaintenanceStatus("Configuring CNI relation")
-    assert len(harness.model.relations["cni"]) == 1
-    relation = harness.model.relations["cni"][0]
-    assert relation.data[charm.unit] == {
-        "cidr": "10.0.0.0/24",
-        "cni-conf-file": "05-cilium.conflist",
-    }
+    with mock.patch("charm._config_file") as mock_config_file:
+        mock_config_file.return_value = Path("/etc/cni/net.d/05-cilium.conflist")
+        charm._configure_cni_relation()
+        assert charm.unit.status == MaintenanceStatus("Configuring CNI relation")
+        assert len(harness.model.relations["cni"]) == 1
+        relation = harness.model.relations["cni"][0]
+        assert relation.data[charm.unit] == {
+            "cidr": "10.0.0.0/24",
+            "cni-conf-file": "05-cilium.conflist",
+        }
 
 
 @pytest.mark.parametrize(

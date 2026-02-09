@@ -12,7 +12,7 @@ from functools import cached_property
 from pathlib import Path
 from subprocess import CalledProcessError, check_output
 from tarfile import TarError
-from typing import List, Mapping
+from typing import List, Mapping, Optional
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import (
@@ -44,6 +44,7 @@ from metrics_validator import HubbleMetrics
 log = logging.getLogger(__name__)
 
 CLI_CLIENTS_PATH = Path("/usr/local/bin")
+CNI_CONF_DIR = Path("/etc/cni/net.d")
 TEMPLATES_PATH = Path("./templates")
 PORT_FORWARD_SERVICE = "hubble-port-forward.service"
 RESOURCES = ["cilium", "hubble"]
@@ -55,6 +56,12 @@ def _sysctl_get(*keys: str) -> Mapping[str, str]:
         raise ValueError("At least one key must be provided.")
     out = check_output(["sysctl", *keys], text=True)
     return dict(line.split(" = ") for line in out.splitlines())
+
+
+def _config_file(config_dir: Path) -> Optional[Path]:
+    """Discover the CNI config file in the given directory."""
+    conf_files = sorted(config_dir.glob("*-cilium.conf*"))
+    return conf_files[-1] if conf_files else None
 
 
 class CiliumCharm(CharmBase):
@@ -172,9 +179,12 @@ class CiliumCharm(CharmBase):
     def _configure_cni_relation(self):
         self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
-        for r in self.model.relations["cni"]:
-            r.data[self.unit]["cidr"] = cidr
-            r.data[self.unit]["cni-conf-file"] = "05-cilium.conflist"
+        if conf_file := _config_file(CNI_CONF_DIR):
+            for r in self.model.relations["cni"]:
+                r.data[self.unit]["cidr"] = cidr
+                r.data[self.unit]["cni-conf-file"] = conf_file.name
+        else:
+            log.warning("No CNI config file found in %s", CNI_CONF_DIR)
 
     def _configure_hubble(self, event):
         if self.model.config["enable-hubble"]:
@@ -347,6 +357,7 @@ class CiliumCharm(CharmBase):
             return
 
     def _on_update_status(self, _):
+        self._configure_cni_relation()
         self._set_active_status()
 
     def _ops_wait_for(self, event, msg, exc_info=None):
