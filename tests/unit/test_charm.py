@@ -133,14 +133,14 @@ def test_configure_cni_relation(harness, charm):
     harness.add_relation_unit(rel_id, "kubernetes-control-plane/0")
 
     with mock.patch("charm._config_file") as mock_config_file:
-        mock_config_file.return_value = Path("/etc/cni/net.d/05-cilium.conflist")
+        mock_config_file.return_value = Path("/etc/cni/net.d/100-cilium.conf")
         charm._configure_cni_relation()
         assert charm.unit.status == MaintenanceStatus("Configuring CNI relation")
         assert len(harness.model.relations["cni"]) == 1
         relation = harness.model.relations["cni"][0]
         assert relation.data[charm.unit] == {
             "cidr": "10.0.0.0/24",
-            "cni-conf-file": "05-cilium.conflist",
+            "cni-conf-file": "100-cilium.conf",
         }
 
 
