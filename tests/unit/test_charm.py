@@ -26,12 +26,13 @@ def test_config_file(tmp_path):
     conf_file.touch()
     assert _config_file(tmp_path) == conf_file
 
-    # Test with .conflist file (should prefer the last one alphabetically)
+    # Test with both .conf and .conflist files
+    # The function returns the last file in sorted order
     conflist_file = tmp_path / "05-cilium.conflist"
     conflist_file.touch()
     assert _config_file(tmp_path) == conflist_file
 
-    # Test with multiple files (should return the last one sorted)
+    # Test with multiple files - should return the last one sorted
     another_file = tmp_path / "10-cilium.conf"
     another_file.touch()
     result = _config_file(tmp_path)
