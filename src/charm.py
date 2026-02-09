@@ -61,7 +61,12 @@ def _sysctl_get(*keys: str) -> Mapping[str, str]:
 def _config_file(config_dir: Path) -> Optional[Path]:
     """Discover the CNI config file in the given directory."""
     conf_files = sorted(config_dir.glob("*-cilium.conf*"))
-    return conf_files[-1] if conf_files else None
+    if conf_files:
+        log.info("CNI config files found: %s", ", ".join(f.name for f in conf_files))
+        return conf_files[-1]
+    else:
+        log.warning("No CNI config file found in %s", config_dir)
+        return None
 
 
 class CiliumCharm(CharmBase):
@@ -179,12 +184,10 @@ class CiliumCharm(CharmBase):
     def _configure_cni_relation(self):
         self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
-        if conf_file := _config_file(CNI_CONF_DIR):
-            for r in self.model.relations["cni"]:
-                r.data[self.unit]["cidr"] = cidr
-                r.data[self.unit]["cni-conf-file"] = conf_file.name
-        else:
-            log.warning("No CNI config file found in %s", CNI_CONF_DIR)
+        conf_file = _config_file(CNI_CONF_DIR) or Path("05-cilium.conflist")
+        for r in self.model.relations["cni"]:
+            r.data[self.unit]["cidr"] = cidr
+            r.data[self.unit]["cni-conf-file"] = conf_file.name
 
     def _configure_hubble(self, event):
         if self.model.config["enable-hubble"]:

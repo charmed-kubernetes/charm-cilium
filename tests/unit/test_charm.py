@@ -144,6 +144,26 @@ def test_configure_cni_relation(harness, charm):
         }
 
 
+def test_configure_cni_relation_fallback(harness, charm):
+    harness.disable_hooks()
+    config_dict = {"cluster-pool-ipv4-cidr": "10.0.0.0/24"}
+    harness.update_config(config_dict)
+    rel_id = harness.add_relation("cni", "kubernetes-control-plane")
+    harness.add_relation_unit(rel_id, "kubernetes-control-plane/0")
+
+    # Test fallback when no config file is found
+    with mock.patch("charm._config_file") as mock_config_file:
+        mock_config_file.return_value = None
+        charm._configure_cni_relation()
+        assert charm.unit.status == MaintenanceStatus("Configuring CNI relation")
+        assert len(harness.model.relations["cni"]) == 1
+        relation = harness.model.relations["cni"][0]
+        assert relation.data[charm.unit] == {
+            "cidr": "10.0.0.0/24",
+            "cni-conf-file": "05-cilium.conflist",
+        }
+
+
 @pytest.mark.parametrize(
     "enable_hubble,hubble_configured",
     [
