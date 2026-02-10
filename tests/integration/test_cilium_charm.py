@@ -188,8 +188,8 @@ async def test_hubble(ops_test, active_hubble, kubectl_exec):
     assert dropped >= 1, f"Not enough dropped in stdout\n{stdout}"
 
 
-async def test_grafana(ops_test, traefik_ingress, grafana_password, expected_dashboard_titles):
-    grafana = Grafana(ops_test=ops_test, host=traefik_ingress, password=grafana_password)
+async def test_grafana(ops_test, traefik_url, grafana_password, expected_dashboard_titles):
+    grafana = Grafana(ops_test=ops_test, host_url=traefik_url, password=grafana_password)
     while not await grafana.is_ready():
         log.info("Waiting for Grafana to be ready ...")
         await asyncio.sleep(5)
@@ -202,8 +202,8 @@ async def test_grafana(ops_test, traefik_ingress, grafana_password, expected_das
 
 
 @pytest.mark.usefixtures("related_prometheus")
-async def test_prometheus(ops_test, traefik_ingress):
-    prometheus = Prometheus(ops_test=ops_test, host=traefik_ingress)
+async def test_prometheus(ops_test, traefik_url):
+    prometheus = Prometheus(ops_test=ops_test, host_url=traefik_url)
     while not await prometheus.is_ready():
         log.info("Waiting for Prometheus to be ready...")
         await asyncio.sleep(5)

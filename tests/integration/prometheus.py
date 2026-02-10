@@ -9,17 +9,17 @@ class Prometheus:
     def __init__(
         self,
         ops_test,
-        host: Optional[str] = "localhost",
+        host_url: Optional[str] = "http://localhost",
     ):
         """Manage a Prometheus application.
 
         Args:
             ops_test: Default instance of ops_test.
-            host: Optional host address of Prometheus application, defaults to `localhost`
+            host_url: Optional host address of Prometheus application, defaults to `http://localhost`
 
         """
         self.ops_test = ops_test
-        self.base_uri = f"http://{host}/cos-prometheus-0"
+        self.base_uri = f"{host_url}/cos-prometheus-0"
 
     async def is_ready(self) -> bool:
         """Send a request to check readiness.
