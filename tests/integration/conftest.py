@@ -252,7 +252,7 @@ async def cos_lite_installed(ops_test, cos_model):
     yield
 
     log.info("Removing COS Lite charms...")
-    for charm in model.applications:
+    for charm in list(model.applications):
         log.info(f"Removing {charm}...")
         await model.remove_application(charm, force=True, destroy_storage=True)
     await model.block_until(
