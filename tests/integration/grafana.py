@@ -9,7 +9,7 @@ class Grafana:
     def __init__(
         self,
         ops_test,
-        host: Optional[str] = "localhost",
+        host_url: Optional[str] = "http://localhost",
         username: Optional[str] = "admin",
         password: Optional[str] = "",
     ):
@@ -17,13 +17,13 @@ class Grafana:
 
         Args:
             ops_test: Default instance of ops_test.
-            host: Optional host address of Grafana application, defaults to `localhost`.
+            host_url: Optional host address of Grafana application, defaults to `http://localhost`.
             username: Optional username to connect with, defaults to `admin`.
             password: Optional password to connect with, defaults to `""`.
 
         """
         self.ops_test = ops_test
-        self.base_uri = f"http://{host}/cos-grafana"
+        self.base_uri = f"{host_url}/cos-grafana"
         self.username = username
         self.password = password
 
