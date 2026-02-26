@@ -135,7 +135,6 @@ def test_configure_cni_relation(harness, charm):
     with mock.patch("charm._config_file") as mock_config_file:
         mock_config_file.return_value = Path("/etc/cni/net.d/100-cilium.conf")
         charm._configure_cni_relation()
-        assert charm.unit.status == MaintenanceStatus("Configuring CNI relation")
         assert len(harness.model.relations["cni"]) == 1
         relation = harness.model.relations["cni"][0]
         assert relation.data[charm.unit] == {
@@ -155,7 +154,6 @@ def test_configure_cni_relation_fallback(harness, charm):
     with mock.patch("charm._config_file") as mock_config_file:
         mock_config_file.return_value = None
         charm._configure_cni_relation()
-        assert charm.unit.status == MaintenanceStatus("Configuring CNI relation")
         assert len(harness.model.relations["cni"]) == 1
         relation = harness.model.relations["cni"][0]
         assert relation.data[charm.unit] == {

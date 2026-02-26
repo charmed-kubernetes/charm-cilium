@@ -181,12 +181,13 @@ class CiliumCharm(CharmBase):
             return
 
     def _configure_cni_relation(self):
-        self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
         conf_file = _config_file(CNI_CONF_DIR) or Path("05-cilium.conflist")
-        for r in self.model.relations["cni"]:
-            r.data[self.unit]["cidr"] = cidr
-            r.data[self.unit]["cni-conf-file"] = conf_file.name
+        cni_relations = self.model.relations["cni"]
+        if cni_relations:
+            for r in cni_relations:
+                r.data[self.unit]["cidr"] = cidr
+                r.data[self.unit]["cni-conf-file"] = conf_file.name
 
     def _configure_hubble(self, event):
         if self.model.config["enable-hubble"]:
