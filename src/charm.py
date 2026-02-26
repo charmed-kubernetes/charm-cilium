@@ -22,7 +22,7 @@ from httpx import HTTPError
 from jinja2 import Environment, FileSystemLoader
 from lightkube import Client, codecs
 from lightkube.core.exceptions import ApiError
-from ops.charm import CharmBase
+from ops.charm import CharmBase, UpdateStatusEvent
 from ops.framework import StoredState
 from ops.main import main
 from ops.manifests import Collector, ManifestClientError
@@ -180,14 +180,14 @@ class CiliumCharm(CharmBase):
             log.exception(errors)
             return
 
-    def _configure_cni_relation(self):
+    def _configure_cni_relation(self, event):
+        if not isinstance(event, UpdateStatusEvent):
+            self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
         conf_file = _config_file(CNI_CONF_DIR) or Path("05-cilium.conflist")
-        cni_relations = self.model.relations["cni"]
-        if cni_relations:
-            for r in cni_relations:
-                r.data[self.unit]["cidr"] = cidr
-                r.data[self.unit]["cni-conf-file"] = conf_file.name
+        for r in self.model.relations["cni"]:
+            r.data[self.unit]["cidr"] = cidr
+            r.data[self.unit]["cni-conf-file"] = conf_file.name
 
     def _configure_hubble(self, event):
         if self.model.config["enable-hubble"]:
@@ -300,7 +300,7 @@ class CiliumCharm(CharmBase):
             log.exception(f"Failed to modify {PORT_FORWARD_SERVICE} service")
 
     def _on_config_changed(self, event):
-        self._configure_cni_relation()
+        self._configure_cni_relation(event)
         self._configure_cilium(event)
         if self.stored.cilium_configured:
             self._install_cli_resources()
@@ -311,8 +311,8 @@ class CiliumCharm(CharmBase):
         self._configure_cilium(event)
         self._set_active_status()
 
-    def _on_cni_relation_joined(self, _):
-        self._configure_cni_relation()
+    def _on_cni_relation_joined(self, event):
+        self._configure_cni_relation(event)
         self._set_active_status()
 
     def _on_install(self, _):
@@ -359,8 +359,8 @@ class CiliumCharm(CharmBase):
             event.defer()
             return
 
-    def _on_update_status(self, _):
-        self._configure_cni_relation()
+    def _on_update_status(self, event):
+        self._configure_cni_relation(event)
         self._set_active_status()
 
     def _ops_wait_for(self, event, msg, exc_info=None):

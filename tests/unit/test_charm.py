@@ -10,7 +10,7 @@ from tarfile import TarError
 import ops.testing
 import pytest
 from ops.manifests import ManifestClientError
-from ops.model import BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
 
 ops.testing.SIMULATE_CAN_CONNECT = True
 
@@ -134,7 +134,9 @@ def test_configure_cni_relation(harness, charm):
 
     with mock.patch("charm._config_file") as mock_config_file:
         mock_config_file.return_value = Path("/etc/cni/net.d/100-cilium.conf")
-        charm._configure_cni_relation()
+        mock_event = mock.MagicMock()
+        charm._configure_cni_relation(mock_event)
+        assert charm.unit.status == MaintenanceStatus("Configuring CNI relation")
         assert len(harness.model.relations["cni"]) == 1
         relation = harness.model.relations["cni"][0]
         assert relation.data[charm.unit] == {
@@ -153,7 +155,36 @@ def test_configure_cni_relation_fallback(harness, charm):
     # Test fallback when no config file is found
     with mock.patch("charm._config_file") as mock_config_file:
         mock_config_file.return_value = None
-        charm._configure_cni_relation()
+        mock_event = mock.MagicMock()
+        charm._configure_cni_relation(mock_event)
+        assert charm.unit.status == MaintenanceStatus("Configuring CNI relation")
+        assert len(harness.model.relations["cni"]) == 1
+        relation = harness.model.relations["cni"][0]
+        assert relation.data[charm.unit] == {
+            "cidr": "10.0.0.0/24",
+            "cni-conf-file": "05-cilium.conflist",
+        }
+
+
+def test_configure_cni_relation_update_status(harness, charm):
+    from ops.charm import UpdateStatusEvent
+
+    harness.disable_hooks()
+    config_dict = {"cluster-pool-ipv4-cidr": "10.0.0.0/24"}
+    harness.update_config(config_dict)
+    rel_id = harness.add_relation("cni", "kubernetes-control-plane")
+    harness.add_relation_unit(rel_id, "kubernetes-control-plane/0")
+
+    # Set initial status
+    charm.unit.status = ActiveStatus("Running")
+
+    # Test that UpdateStatusEvent does not change status
+    with mock.patch("charm._config_file") as mock_config_file:
+        mock_config_file.return_value = Path("/etc/cni/net.d/05-cilium.conflist")
+        mock_event = mock.MagicMock(spec=UpdateStatusEvent)
+        charm._configure_cni_relation(mock_event)
+        # Status should remain Active, not change to Maintenance
+        assert charm.unit.status == ActiveStatus("Running")
         assert len(harness.model.relations["cni"]) == 1
         relation = harness.model.relations["cni"][0]
         assert relation.data[charm.unit] == {
