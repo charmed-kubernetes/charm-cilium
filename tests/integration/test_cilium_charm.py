@@ -36,7 +36,7 @@ async def test_build_and_deploy(ops_test: OpsTest, version, sysctl_post_deploy):
         raise ValueError(f"Unsupported cloud type for cilium tests: {_type}")
 
     # Configure model
-    cloud_config = yaml.safe_load(cloud_overlay.open())
+    cloud_config = yaml.safe_load(cloud_overlay.read_text())
     if model_config := cloud_config.get("model-config", {}):
         cmd = ["model-config"]
         for key, value in model_config.items():
