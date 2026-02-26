@@ -12,7 +12,7 @@ from functools import cached_property
 from pathlib import Path
 from subprocess import CalledProcessError, check_output
 from tarfile import TarError
-from typing import List, Mapping
+from typing import List, Mapping, Optional
 
 from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.prometheus_k8s.v0.prometheus_remote_write import (
@@ -22,7 +22,7 @@ from httpx import HTTPError
 from jinja2 import Environment, FileSystemLoader
 from lightkube import Client, codecs
 from lightkube.core.exceptions import ApiError
-from ops.charm import CharmBase
+from ops.charm import CharmBase, UpdateStatusEvent
 from ops.framework import StoredState
 from ops.main import main
 from ops.manifests import Collector, ManifestClientError
@@ -44,6 +44,7 @@ from metrics_validator import HubbleMetrics
 log = logging.getLogger(__name__)
 
 CLI_CLIENTS_PATH = Path("/usr/local/bin")
+CNI_CONF_DIR = Path("/etc/cni/net.d")
 TEMPLATES_PATH = Path("./templates")
 PORT_FORWARD_SERVICE = "hubble-port-forward.service"
 RESOURCES = ["cilium", "hubble"]
@@ -55,6 +56,16 @@ def _sysctl_get(*keys: str) -> Mapping[str, str]:
         raise ValueError("At least one key must be provided.")
     out = check_output(["sysctl", *keys], text=True)
     return dict(line.split(" = ") for line in out.splitlines())
+
+
+def _config_file(config_dir: Path) -> Optional[Path]:
+    """Discover the CNI config file in the given directory."""
+    conf_files = sorted(config_dir.glob("*-cilium.conf*"))
+    if conf_files:
+        log.info("CNI config files found: %s", ", ".join(f.name for f in conf_files))
+        return conf_files[-1]
+    log.warning("No CNI config file found in %s", config_dir)
+    return None
 
 
 class CiliumCharm(CharmBase):
@@ -169,12 +180,14 @@ class CiliumCharm(CharmBase):
             log.exception(errors)
             return
 
-    def _configure_cni_relation(self):
-        self.unit.status = MaintenanceStatus("Configuring CNI relation")
+    def _configure_cni_relation(self, event):
+        if not isinstance(event, UpdateStatusEvent):
+            self.unit.status = MaintenanceStatus("Configuring CNI relation")
         cidr = self.model.config["cluster-pool-ipv4-cidr"]
+        conf_file = _config_file(CNI_CONF_DIR) or Path("05-cilium.conflist")
         for r in self.model.relations["cni"]:
             r.data[self.unit]["cidr"] = cidr
-            r.data[self.unit]["cni-conf-file"] = "05-cilium.conf"
+            r.data[self.unit]["cni-conf-file"] = conf_file.name
 
     def _configure_hubble(self, event):
         if self.model.config["enable-hubble"]:
@@ -287,7 +300,7 @@ class CiliumCharm(CharmBase):
             log.exception(f"Failed to modify {PORT_FORWARD_SERVICE} service")
 
     def _on_config_changed(self, event):
-        self._configure_cni_relation()
+        self._configure_cni_relation(event)
         self._configure_cilium(event)
         if self.stored.cilium_configured:
             self._install_cli_resources()
@@ -298,8 +311,8 @@ class CiliumCharm(CharmBase):
         self._configure_cilium(event)
         self._set_active_status()
 
-    def _on_cni_relation_joined(self, _):
-        self._configure_cni_relation()
+    def _on_cni_relation_joined(self, event):
+        self._configure_cni_relation(event)
         self._set_active_status()
 
     def _on_install(self, _):
@@ -346,7 +359,8 @@ class CiliumCharm(CharmBase):
             event.defer()
             return
 
-    def _on_update_status(self, _):
+    def _on_update_status(self, event):
+        self._configure_cni_relation(event)
         self._set_active_status()
 
     def _ops_wait_for(self, event, msg, exc_info=None):
