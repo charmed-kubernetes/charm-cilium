@@ -18,12 +18,12 @@ jobs:
     uses: charmed-kubernetes/workflows/.github/workflows/lint-unit.yaml@main
     with:
       python: "['3.10', '3.12']"
-    needs: 
+    needs:
       - call-inclusive-naming-check
 
   integration-test:
     name: VSphere Integration Test
-    needs: 
+    needs:
       - lint-unit
     runs-on: self-hosted
     timeout-minutes: 120
@@ -47,10 +47,10 @@ jobs:
           clouds-yaml: ${{ secrets.CLOUDS_YAML }}
           bootstrap-constraints: "arch=amd64 cores=2 mem=4G"
           bootstrap-options: >-
-            ${{ secrets.JAMMY_BOOTSTRAP_OPTIONS }}
-            --model-default datastore=vsanDatastore
-            --model-default primary-network=VLAN_2763
-            --model-default force-vm-hardware-version=17
+            ${{ vars.VSPHERE_BOOTSTRAP_NOBLE }}
+            ${{ vars.VSPHERE_BOOTSTRAP_DATASTORE }}
+            ${{ vars.VSPHERE_BOOTSTRAP_VLAN_2763 }}
+            ${{ vars.VSPHERE_BOOTSTRAP_HARDWARE_VERSION }}
       - name: Run test
         run: tox -e integration -- --basetemp=/home/ubuntu/pytest
       - name: Setup Debug Artifact Collection
