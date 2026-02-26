@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Tuple, Union
 
 import pytest
-from helpers import cloud_type, get_address
+from helpers import cloud_type
 from juju.tag import untag
+from juju.model import Model
 from kubernetes import config as k8s_config
 from kubernetes.client import Configuration
 from lightkube import AsyncClient, codecs
@@ -262,7 +263,7 @@ async def cos_lite_installed(ops_test, cos_model):
     yield
 
     log.info("Removing COS Lite charms...")
-    for charm in cos_charms:
+    for charm in list(model.applications):
         log.info(f"Removing {charm}...")
         await model.remove_application(charm, force=True, destroy_storage=True)
     await model.block_until(
@@ -272,8 +273,12 @@ async def cos_lite_installed(ops_test, cos_model):
 
 
 @pytest.fixture(scope="module")
-async def traefik_ingress(cos_model, cos_lite_installed):
-    yield await get_address(model=cos_model, app_name="traefik")
+async def traefik_url(cos_model: Model, cos_lite_installed):
+    """Fixture to fetch Traefik url."""
+    action = await cos_model.applications["traefik"].units[0].run_action("show-proxied-endpoints")
+    action = await action.wait()
+    p_e = json.loads(action.results["proxied-endpoints"])
+    yield p_e["traefik"]["url"]
 
 
 @pytest.fixture(scope="module")
