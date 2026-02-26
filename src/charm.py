@@ -64,9 +64,8 @@ def _config_file(config_dir: Path) -> Optional[Path]:
     if conf_files:
         log.info("CNI config files found: %s", ", ".join(f.name for f in conf_files))
         return conf_files[-1]
-    else:
-        log.warning("No CNI config file found in %s", config_dir)
-        return None
+    log.warning("No CNI config file found in %s", config_dir)
+    return None
 
 
 class CiliumCharm(CharmBase):
