@@ -3,12 +3,15 @@
 # See LICENSE file for licensing details.
 
 import asyncio
+import json
 import logging
 import re
 import shlex
 from pathlib import Path
 
 import pytest
+import yaml
+from helpers import cloud_type
 from grafana import Grafana
 from prometheus import Prometheus
 from pytest_operator.plugin import OpsTest
@@ -22,6 +25,25 @@ SYSCTL = "{net.ipv4.conf.all.forwarding: 1, net.ipv4.conf.all.rp_filter: 0, net.
 @pytest.mark.abort_on_fail
 @pytest.mark.skip_if_deployed
 async def test_build_and_deploy(ops_test: OpsTest, version, sysctl_post_deploy):
+    cloud_overlay: Path = Path()
+    _type, _ = await cloud_type(ops_test)
+    if _type == "vsphere":
+        log.info("Using vsphere overlay for deployment...")
+        cloud_overlay = Path("tests/data/vsphere-overlay.yaml")
+    elif _type == "ec2":
+        log.info("Using aws overlay for deployment...")
+        cloud_overlay = Path("tests/data/aws-overlay.yaml")
+    else:
+        raise ValueError(f"Unsupported cloud type for cilium tests: {_type}")
+
+    # Configure model
+    cloud_config = yaml.safe_load(cloud_overlay.open())
+    if model_config := cloud_config.get("model-config", {}):
+        cmd = ["model-config"]
+        for key, value in model_config.items():
+            cmd.append(f"{key}={value}")
+        await ops_test.juju(*cmd)
+
     charm = next(Path(".").glob("cilium*.charm"), None)
     if not charm:
         log.info("Build charm...")
@@ -49,7 +71,7 @@ async def test_build_and_deploy(ops_test: OpsTest, version, sysctl_post_deploy):
         ops_test.Bundle("kubernetes-core", channel="edge"),
         Path("tests/data/sysctl-overlay.yaml"),
         Path("tests/data/charm.yaml"),
-        Path("tests/data/vsphere-overlay.yaml"),
+        cloud_overlay,
     ]
 
     log.info("Rendering overlays...")
@@ -99,18 +121,21 @@ async def test_cilium_tunnel_port(ops_test: OpsTest):
     cilium_app = ops_test.model.applications["cilium"]
     cilium = cilium_app.units[0]
 
-    await cilium_app.set_config({"tunnel-port": "8473"})
+    await cilium_app.set_config({"tunnel-port": "8473", "tunnel-protocol": "vxlan"})
     async with ops_test.fast_forward("30s"):
         await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
     assert cilium_app.status == "active", "Cilium should be active"
 
-    cmd = "ip -d link show cilium_vxlan"
+    cmd = "ip -json -d link show cilium_vxlan"
     action = await cilium.run(cmd, timeout=60, block=True)
     assert action.status == "completed" and action.results["return-code"] == 0, (
         f"Failed to execute {cmd} on machine: {cilium.machine.hostname}\n{action.results}"
     )
-    stdout = action.results.get("stdout")
-    assert "dstport 8473" in stdout
+    stdout = json.loads(action.results.get("stdout"))
+    vxlan = stdout[0]  # This should be the only interface
+
+    assert vxlan["linkinfo"]["info_kind"] == "vxlan"
+    assert vxlan["linkinfo"]["info_data"]["port"] == 8473
 
 
 async def test_cilium_tunnel_protocol(ops_test: OpsTest):
