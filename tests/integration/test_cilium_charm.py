@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 import asyncio
+import json
 import logging
 import re
 import shlex
@@ -36,7 +37,7 @@ async def test_build_and_deploy(ops_test: OpsTest, version, sysctl_post_deploy):
         raise ValueError(f"Unsupported cloud type for cilium tests: {_type}")
 
     # Configure model
-    cloud_config = yaml.safe_load(cloud_overlay.read_text())
+    cloud_config = yaml.safe_load(cloud_overlay.open())
     if model_config := cloud_config.get("model-config", {}):
         cmd = ["model-config"]
         for key, value in model_config.items():
@@ -130,8 +131,11 @@ async def test_cilium_tunnel_port(ops_test: OpsTest):
     assert action.status == "completed" and action.results["return-code"] == 0, (
         f"Failed to execute {cmd} on machine: {cilium.machine.hostname}\n{action.results}"
     )
-    stdout = action.results.get("stdout")
-    assert "dstport 8473" in stdout
+    stdout = json.loads(action.results.get("stdout"))
+    vxlan = stdout[0]  # This should be the only interface
+
+    assert vxlan["linkinfo"]["info_kind"] == "vxlan"
+    assert vxlan["linkinfo"]["info_data"]["port"] == 8473
 
 
 async def test_cilium_tunnel_protocol(ops_test: OpsTest):
