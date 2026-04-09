@@ -19,3 +19,6 @@ extend-exclude = ["__pycache__", "*.egg_info"]
 
 [tool.codespell]
 skip = "./upstream/*"
+
+[tool.bandit]
+exclude_dirs = [".tox", ".venv", "venv"]
