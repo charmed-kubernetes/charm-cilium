@@ -59,8 +59,11 @@ jobs:
       - name: Collect Juju Status
         if: ${{ failure() }}
         run: |
-          juju status 2>&1 | tee tmp/juju-status.txt
-          juju-crashdump -s -m controller -a debug-layer -a config -o tmp/
+          model=$(juju models --format=json | jq -r \
+            '.models[].name | select(startswith("test-cilium-charm-"))' | tail -n1)
+          juju status -m "$model" 2>&1 | tee tmp/juju-status.txt
+          juju debug-log -m "$model" --replay --no-tail 2>&1 | tee tmp/juju-debug-log.txt
+          juju-crashdump -s -m "$model" -a debug-layer -a config -o tmp/
           mv juju-crashdump-* tmp/ | true
       - name: Upload debug artifacts
         if: ${{ failure() }}
