@@ -52,7 +52,9 @@ jobs:
             ${{ vars.VSPHERE_BOOTSTRAP_VLAN_2763 }}
             ${{ vars.VSPHERE_BOOTSTRAP_HARDWARE_VERSION }}
       - name: Run test
-        run: tox -e integration -- --basetemp=/home/ubuntu/pytest
+        run: >-
+          tox -e integration -- --basetemp=/home/ubuntu/pytest
+          --crash-dump=on-failure --crash-dump-output=tmp
       - name: Setup Debug Artifact Collection
         if: ${{ failure() }}
         run: mkdir tmp
