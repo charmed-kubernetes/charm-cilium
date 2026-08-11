@@ -172,12 +172,14 @@ async def test_hubble(ops_test, active_hubble, kubectl_exec):
     log.info("Retrieving logs from Hubble...")
     cmd = "hubble observe --pod deathstar --protocol http"
     stdout = None
-    while not stdout:
+    deadline = asyncio.get_running_loop().time() + TEN_MINUTES
+    while not stdout and asyncio.get_running_loop().time() < deadline:
         action = await cilium.run(cmd, timeout=10, block=True)
         assert action.status == "completed" and action.results["return-code"] == 0, (
             f"Failed to fetch Hubble logs {cmd} on machine: {cilium.machine.hostname}\n{action.results}"
         )
         stdout = action.results.get("stdout")
+    assert stdout, "Timed out waiting for Hubble flow logs"
 
     forwarded = len(re.findall("FORWARDED", stdout))
     dropped = len(re.findall("DROPPED", stdout))
@@ -190,9 +192,11 @@ async def test_hubble(ops_test, active_hubble, kubectl_exec):
 
 async def test_grafana(ops_test, traefik_url, grafana_password, expected_dashboard_titles):
     grafana = Grafana(ops_test=ops_test, host_url=traefik_url, password=grafana_password)
-    while not await grafana.is_ready():
+    deadline = asyncio.get_running_loop().time() + TEN_MINUTES
+    while not await grafana.is_ready() and asyncio.get_running_loop().time() < deadline:
         log.info("Waiting for Grafana to be ready ...")
         await asyncio.sleep(5)
+    assert await grafana.is_ready(), "Timed out waiting for Grafana to become ready"
     dashboards = await grafana.dashboards_all()
     actual_dashboard_titles = []
     for dashboard in dashboards:
@@ -204,9 +208,11 @@ async def test_grafana(ops_test, traefik_url, grafana_password, expected_dashboa
 @pytest.mark.usefixtures("related_prometheus")
 async def test_prometheus(ops_test, traefik_url):
     prometheus = Prometheus(ops_test=ops_test, host_url=traefik_url)
-    while not await prometheus.is_ready():
+    deadline = asyncio.get_running_loop().time() + TEN_MINUTES
+    while not await prometheus.is_ready() and asyncio.get_running_loop().time() < deadline:
         log.info("Waiting for Prometheus to be ready...")
         await asyncio.sleep(5)
+    assert await prometheus.is_ready(), "Timed out waiting for Prometheus to become ready"
     log.info("Waiting for metrics...")
     await asyncio.sleep(120)
     metrics = await prometheus.get_metrics()

@@ -53,13 +53,13 @@ jobs:
             ${{ vars.VSPHERE_BOOTSTRAP_HARDWARE_VERSION }}
       - name: Run test
         run: >-
-          tox -e integration -- --basetemp=/home/ubuntu/pytest
+          timeout --foreground 105m tox -e integration -- --basetemp=/home/ubuntu/pytest
           --crash-dump=on-failure --crash-dump-output=tmp
       - name: Setup Debug Artifact Collection
-        if: ${{ failure() }}
-        run: mkdir tmp
+        if: ${{ failure() || cancelled() }}
+        run: mkdir -p tmp
       - name: Collect Juju Status
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         run: |
           model=$(juju models --format=json | jq -r \
             '.models[].name | select(startswith("test-cilium-charm-"))' | tail -n1)
@@ -68,7 +68,7 @@ jobs:
           juju-crashdump -s -m "$model" -a debug-layer -a config -o tmp/
           mv juju-crashdump-* tmp/ | true
       - name: Upload debug artifacts
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-run-artifacts
