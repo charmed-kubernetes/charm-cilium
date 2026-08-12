@@ -62,9 +62,12 @@ jobs:
         if: ${{ failure() || cancelled() }}
         run: |
           model=$(juju models --format=json | jq -r \
-            '.models[].name | select(startswith("test-cilium-charm-"))' | tail -n1)
+            '.models[]."short-name" | select(startswith("test-cilium-charm-"))' | tail -n1)
           juju status -m "$model" 2>&1 | tee tmp/juju-status.txt
           juju debug-log -m "$model" --replay --no-tail 2>&1 | tee tmp/juju-debug-log.txt
+          kubectl get pods -A -o wide 2>&1 | tee tmp/k8s-pods.txt
+          kubectl get pods -A --field-selector=status.phase!=Running -o name 2>&1 \
+            | xargs -r -n1 kubectl describe 2>&1 | tee tmp/k8s-pod-describe.txt
           juju-crashdump -s -m "$model" -a debug-layer -a config -o tmp/
           mv juju-crashdump-* tmp/ | true
       - name: Upload debug artifacts
