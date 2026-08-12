@@ -12,6 +12,7 @@ from kubernetes.client import Configuration
 from lightkube import AsyncClient, codecs
 from lightkube.config.kubeconfig import KubeConfig
 from lightkube.generic_resource import create_namespaced_resource
+from lightkube.resources.apps_v1 import Deployment
 from lightkube.resources.core_v1 import Pod
 from pytest_operator.plugin import OpsTest
 
@@ -113,6 +114,13 @@ async def hubble_test_resources(kubernetes, cilium_np_resource):
             for_conditions=["Ready"],
             namespace="default",
         )
+
+    await kubernetes.wait(
+        Deployment,
+        "deathstar",
+        for_conditions=["Available"],
+        namespace="default",
+    )
 
     yield pods
 

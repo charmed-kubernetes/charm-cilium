@@ -54,10 +54,12 @@ jobs:
       - name: Run test
         run: >-
           timeout --foreground 105m tox -e integration -- --basetemp=/home/ubuntu/pytest
-          --crash-dump=on-failure --crash-dump-output=tmp
+          --crash-dump=on-failure --crash-dump-output=pytest-operator-crashdump.tar.gz
       - name: Setup Debug Artifact Collection
         if: ${{ failure() || cancelled() }}
-        run: mkdir -p tmp
+        run: |
+          mkdir -p tmp
+          mv pytest-operator-crashdump.tar.gz tmp/ || true
       - name: Collect Juju Status
         if: ${{ failure() || cancelled() }}
         run: |
