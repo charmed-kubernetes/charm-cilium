@@ -4,10 +4,6 @@ applications:
       http_proxy: http://squid.internal:3128
       https_proxy: http://squid.internal:3128
       no_proxy: localhost,127.0.0.1,::1,10.246.154.0/24,10.152.183.0/24,192.168.0.0/16
-  kubernetes-control-plane:
-    constraints: root-disk=40G
-  kubernetes-worker:
-    constraints: root-disk=40G
   vsphere-integrator:
     charm: vsphere-integrator
     channel: edge
@@ -16,6 +12,11 @@ applications:
   vsphere-cloud-provider:
     charm: vsphere-cloud-provider
     channel: edge
+machines:
+  "0":
+    constraints: cores=2 mem=8G root-disk=40G
+  "1":
+    constraints: cores=2 mem=8G root-disk=40G
 relations:
 - - vsphere-cloud-provider:certificates
   - easyrsa:client
