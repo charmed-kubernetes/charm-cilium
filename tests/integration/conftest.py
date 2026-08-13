@@ -207,7 +207,7 @@ async def metallb_installed(request, metallb_model):
     charm = "metallb"
     await m.deploy(entity_url=charm, trust=True, channel="stable", config={"iprange": ip_range})
     await m.block_until(lambda: charm in m.applications, timeout=60)
-    await m.wait_for_idle(status="active", timeout=5 * 60)
+    await m.wait_for_idle(status="active", timeout=10 * 60)
 
     yield
 
