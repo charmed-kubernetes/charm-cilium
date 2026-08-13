@@ -105,12 +105,25 @@ async def test_cilium_tunnel_port(ops_test: OpsTest):
     assert cilium_app.status == "active", "Cilium should be active"
 
     cmd = "ip -d link show cilium_vxlan"
-    action = await cilium.run(cmd, timeout=60, block=True)
-    assert action.status == "completed" and action.results["return-code"] == 0, (
-        f"Failed to execute {cmd} on machine: {cilium.machine.hostname}\n{action.results}"
+    deadline = asyncio.get_running_loop().time() + TEN_MINUTES
+    action = None
+    while asyncio.get_running_loop().time() < deadline:
+        action = await cilium.run(cmd, timeout=60, block=True)
+        if action.status == "completed" and action.results["return-code"] == 0:
+            stdout = action.results.get("stdout", "")
+            if "dstport 8473" in stdout:
+                return
+        await asyncio.sleep(5)
+
+    assert action is not None, "Timed out before checking the Cilium VXLAN interface"
+    assert (
+        action.status == "completed"
+        and action.results["return-code"] == 0
+        and "dstport 8473" in action.results.get("stdout", "")
+    ), (
+        f"Timed out waiting for cilium_vxlan to use port 8473 on "
+        f"{cilium.machine.hostname}\n{action.results}"
     )
-    stdout = action.results.get("stdout")
-    assert "dstport 8473" in stdout
 
 
 async def test_cilium_tunnel_protocol(ops_test: OpsTest):

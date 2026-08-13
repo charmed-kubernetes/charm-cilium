@@ -67,10 +67,18 @@ jobs:
             '.models[]."short-name" | select(startswith("test-cilium-charm-"))' | tail -n1)
           juju status -m "$model" 2>&1 | tee tmp/juju-status.txt
           juju debug-log -m "$model" --replay --no-tail 2>&1 | tee tmp/juju-debug-log.txt
-          kubectl get pods -A -o wide 2>&1 | tee tmp/k8s-pods.txt
-          kubectl get pods -A --field-selector=status.phase!=Running -o name 2>&1 \
-            | xargs -r -n1 kubectl describe 2>&1 | tee tmp/k8s-pod-describe.txt
-          juju-crashdump -s -m "$model" -a debug-layer -a config -o tmp/
+          if juju scp -m "$model" kubernetes-control-plane/leader:/home/ubuntu/config tmp/kubeconfig \
+            > tmp/kubeconfig-copy.txt 2>&1; then
+            kubectl --kubeconfig tmp/kubeconfig get pods -A -o wide > tmp/k8s-pods.txt 2>&1 || true
+            {
+              kubectl --kubeconfig tmp/kubeconfig get pods -A -o json \
+                | jq -r '.items[] | select(.status.phase != "Succeeded" and (any(.status.conditions[]?; .type == "Ready" and .status == "True") | not)) | [.metadata.namespace, .metadata.name] | @tsv' \
+                | while IFS=$'\t' read -r namespace pod; do
+                    kubectl --kubeconfig tmp/kubeconfig -n "$namespace" describe pod "$pod"
+                  done
+            } > tmp/k8s-pod-describe.txt 2>&1 || true
+          fi
+          juju-crashdump -s -m "$model" -a debug-layer -a config -o tmp/ || true
           mv juju-crashdump-* tmp/ | true
       - name: Upload debug artifacts
         if: ${{ failure() || cancelled() }}

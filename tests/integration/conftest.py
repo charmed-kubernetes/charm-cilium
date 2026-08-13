@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import shlex
@@ -18,6 +19,7 @@ from pytest_operator.plugin import OpsTest
 
 log = logging.getLogger(__name__)
 KubeCtl = Union[str, Tuple[int, str, str]]
+TEN_MINUTES = 10 * 60
 
 
 def pytest_addoption(parser):
@@ -107,19 +109,26 @@ async def hubble_test_resources(kubernetes, cilium_np_resource):
             pods.append(obj.metadata.name)
         await kubernetes.create(obj)
 
+    deadline = asyncio.get_running_loop().time() + TEN_MINUTES
     for pod in pods:
-        await kubernetes.wait(
-            Pod,
-            pod,
-            for_conditions=["Ready"],
-            namespace="default",
+        await asyncio.wait_for(
+            kubernetes.wait(
+                Pod,
+                pod,
+                for_conditions=["Ready"],
+                namespace="default",
+            ),
+            timeout=max(0, deadline - asyncio.get_running_loop().time()),
         )
 
-    await kubernetes.wait(
-        Deployment,
-        "deathstar",
-        for_conditions=["Available"],
-        namespace="default",
+    await asyncio.wait_for(
+        kubernetes.wait(
+            Deployment,
+            "deathstar",
+            for_conditions=["Available"],
+            namespace="default",
+        ),
+        timeout=max(0, deadline - asyncio.get_running_loop().time()),
     )
 
     yield pods
