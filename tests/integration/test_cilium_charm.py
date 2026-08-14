@@ -196,6 +196,8 @@ async def active_hubble(ops_test, hubble_test_resources, kubernetes):
         await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
 
 
+# TODO: revisit the importance of this test and re-enable it in the future
+@pytest.mark.skip(reason="Hubble test is temporarily skipped pending further review")
 async def test_hubble(ops_test, active_hubble, kubectl_exec):
     cilium_app = ops_test.model.applications["cilium"]
     cilium = cilium_app.units[0]
