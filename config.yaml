@@ -48,7 +48,7 @@ options:
       For more information about configuring this value, please visit:
          https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/#id2
   image-registry:
-    default: rocks.canonical.com:443/cdk
+    default: ghcr.io/canonical/cdk
     type: string
     description: |
       Source registry of Cilium CNI images.
