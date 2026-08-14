@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from grafana import Grafana
+from lightkube.resources.apps_v1 import Deployment
 from prometheus import Prometheus
 from pytest_operator.plugin import OpsTest
 
@@ -156,12 +157,36 @@ async def test_cli_resources(ops_test: OpsTest):
 
 
 @pytest.fixture
-async def active_hubble(ops_test, hubble_test_resources):
+async def active_hubble(ops_test, hubble_test_resources, kubernetes):
     log.info("Enabling Hubble...")
     cilium_app = ops_test.model.applications["cilium"]
     await cilium_app.set_config({"enable-hubble": "true", "port-forward-hubble": "true"})
     async with ops_test.fast_forward("30s"):
         await ops_test.model.wait_for_idle(status="active", timeout=TEN_MINUTES)
+    await asyncio.wait_for(
+        kubernetes.wait(
+            Deployment,
+            "hubble-relay",
+            for_conditions=["Available"],
+            namespace="kube-system",
+        ),
+        timeout=TEN_MINUTES,
+    )
+
+    cilium = cilium_app.units[0]
+    expected_nodes = f"Connected Nodes: {len(cilium_app.units)}/{len(cilium_app.units)}"
+    deadline = asyncio.get_running_loop().time() + TEN_MINUTES
+    status = None
+    while asyncio.get_running_loop().time() < deadline:
+        action = await cilium.run("hubble status", timeout=30, block=True)
+        if action.status == "completed" and action.results["return-code"] == 0:
+            status = action.results.get("stdout", "")
+            if "Healthcheck (via localhost:4245): Ok" in status and expected_nodes in status:
+                break
+        await asyncio.sleep(5)
+
+    assert status is not None, "Timed out waiting for the Hubble API to become available"
+    assert "Healthcheck (via localhost:4245): Ok" in status and expected_nodes in status, status
 
     yield
 
@@ -183,7 +208,7 @@ async def test_hubble(ops_test, active_hubble, kubectl_exec):
     await kubectl_exec("tiefighter", "default", denied_req)
 
     log.info("Retrieving logs from Hubble...")
-    cmd = "hubble observe --pod deathstar --protocol http"
+    cmd = "hubble observe --since 2m --last 100 --pod default/deathstar --protocol http"
     stdout = None
     deadline = asyncio.get_running_loop().time() + TEN_MINUTES
     while not stdout and asyncio.get_running_loop().time() < deadline:
