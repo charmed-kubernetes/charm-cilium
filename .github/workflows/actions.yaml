@@ -52,18 +52,36 @@ jobs:
             ${{ vars.VSPHERE_BOOTSTRAP_VLAN_2763 }}
             ${{ vars.VSPHERE_BOOTSTRAP_HARDWARE_VERSION }}
       - name: Run test
-        run: tox -e integration -- --basetemp=/home/ubuntu/pytest
+        run: >-
+          timeout --foreground 105m tox -e integration -- --basetemp=/home/ubuntu/pytest
+          --crash-dump=on-failure --crash-dump-output=pytest-operator-crashdump.tar.gz
       - name: Setup Debug Artifact Collection
-        if: ${{ failure() }}
-        run: mkdir tmp
-      - name: Collect Juju Status
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         run: |
-          juju status 2>&1 | tee tmp/juju-status.txt
-          juju-crashdump -s -m controller -a debug-layer -a config -o tmp/
+          mkdir -p tmp
+          mv pytest-operator-crashdump.tar.gz tmp/ || true
+      - name: Collect Juju Status
+        if: ${{ failure() || cancelled() }}
+        run: |
+          model=$(juju models --format=json | jq -r \
+            '.models[]."short-name" | select(startswith("test-cilium-charm-"))' | tail -n1)
+          juju status -m "$model" 2>&1 | tee tmp/juju-status.txt
+          juju debug-log -m "$model" --replay --no-tail 2>&1 | tee tmp/juju-debug-log.txt
+          if juju scp -m "$model" kubernetes-control-plane/leader:/home/ubuntu/config tmp/kubeconfig \
+            > tmp/kubeconfig-copy.txt 2>&1; then
+            kubectl --kubeconfig tmp/kubeconfig get pods -A -o wide > tmp/k8s-pods.txt 2>&1 || true
+            {
+              kubectl --kubeconfig tmp/kubeconfig get pods -A -o json \
+                | jq -r '.items[] | select(.status.phase != "Succeeded" and (any(.status.conditions[]?; .type == "Ready" and .status == "True") | not)) | [.metadata.namespace, .metadata.name] | @tsv' \
+                | while IFS=$'\t' read -r namespace pod; do
+                    kubectl --kubeconfig tmp/kubeconfig -n "$namespace" describe pod "$pod"
+                  done
+            } > tmp/k8s-pod-describe.txt 2>&1 || true
+          fi
+          juju-crashdump -s -m "$model" -a debug-layer -a config -o tmp/ || true
           mv juju-crashdump-* tmp/ | true
       - name: Upload debug artifacts
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-run-artifacts

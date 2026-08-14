@@ -12,6 +12,11 @@ applications:
   vsphere-cloud-provider:
     charm: vsphere-cloud-provider
     channel: edge
+machines:
+  "0":
+    constraints: cores=2 mem=8G root-disk=40G
+  "1":
+    constraints: cores=2 mem=8G root-disk=40G
 relations:
 - - vsphere-cloud-provider:certificates
   - easyrsa:client
