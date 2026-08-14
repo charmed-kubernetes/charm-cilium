@@ -203,20 +203,26 @@ async def test_hubble(ops_test, active_hubble, kubectl_exec):
     allowed_req = "curl -s -XPOST deathstar.default.svc.cluster.local/v1/request-landing"
     denied_req = "curl -s -XPUT deathstar.default.svc.cluster.local/v1/exhaust-port"
 
-    log.info("Creating requests...")
-    await kubectl_exec("tiefighter", "default", allowed_req)
-    await kubectl_exec("tiefighter", "default", denied_req)
-
-    log.info("Retrieving logs from Hubble...")
+    log.info("Creating requests and retrieving logs from Hubble...")
     cmd = "hubble observe --since 2m --last 100 --pod default/deathstar --protocol http"
     stdout = None
     deadline = asyncio.get_running_loop().time() + TEN_MINUTES
-    while not stdout and asyncio.get_running_loop().time() < deadline:
-        action = await cilium.run(cmd, timeout=10, block=True)
+    while asyncio.get_running_loop().time() < deadline:
+        # Re-generate the flows on every attempt. Enabling Hubble restarts the
+        # Cilium agents, so the L7 policy redirect may not be enforced yet when
+        # the first requests are sent. Re-sending keeps fresh flows inside the
+        # --since window until the policy is active and Hubble records them.
+        await kubectl_exec("tiefighter", "default", allowed_req)
+        await kubectl_exec("tiefighter", "default", denied_req)
+
+        action = await cilium.run(cmd, timeout=30, block=True)
         assert action.status == "completed" and action.results["return-code"] == 0, (
             f"Failed to fetch Hubble logs {cmd} on machine: {cilium.machine.hostname}\n{action.results}"
         )
         stdout = action.results.get("stdout")
+        if stdout:
+            break
+        await asyncio.sleep(5)
     assert stdout, "Timed out waiting for Hubble flow logs"
 
     forwarded = len(re.findall("FORWARDED", stdout))
