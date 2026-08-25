@@ -1,6 +1,6 @@
 ops >= 1.5.0
 cosl
-lightkube
+lightkube<1.0.0
 ops.manifest >= 1.1.0
 Jinja2
 pydantic==1.*

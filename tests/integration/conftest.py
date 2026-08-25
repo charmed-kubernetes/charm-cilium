@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import shlex
@@ -12,11 +13,13 @@ from kubernetes.client import Configuration
 from lightkube import AsyncClient, codecs
 from lightkube.config.kubeconfig import KubeConfig
 from lightkube.generic_resource import create_namespaced_resource
+from lightkube.resources.apps_v1 import Deployment
 from lightkube.resources.core_v1 import Pod
 from pytest_operator.plugin import OpsTest
 
 log = logging.getLogger(__name__)
 KubeCtl = Union[str, Tuple[int, str, str]]
+TEN_MINUTES = 10 * 60
 
 
 def pytest_addoption(parser):
@@ -106,13 +109,27 @@ async def hubble_test_resources(kubernetes, cilium_np_resource):
             pods.append(obj.metadata.name)
         await kubernetes.create(obj)
 
+    deadline = asyncio.get_running_loop().time() + TEN_MINUTES
     for pod in pods:
-        await kubernetes.wait(
-            Pod,
-            pod,
-            for_conditions=["Ready"],
-            namespace="default",
+        await asyncio.wait_for(
+            kubernetes.wait(
+                Pod,
+                pod,
+                for_conditions=["Ready"],
+                namespace="default",
+            ),
+            timeout=max(0, deadline - asyncio.get_running_loop().time()),
         )
+
+    await asyncio.wait_for(
+        kubernetes.wait(
+            Deployment,
+            "deathstar",
+            for_conditions=["Available"],
+            namespace="default",
+        ),
+        timeout=max(0, deadline - asyncio.get_running_loop().time()),
+    )
 
     yield pods
 
@@ -190,7 +207,7 @@ async def metallb_installed(request, metallb_model):
     charm = "metallb"
     await m.deploy(entity_url=charm, trust=True, channel="stable", config={"iprange": ip_range})
     await m.block_until(lambda: charm in m.applications, timeout=60)
-    await m.wait_for_idle(status="active", timeout=5 * 60)
+    await m.wait_for_idle(status="active", timeout=10 * 60)
 
     yield
 
