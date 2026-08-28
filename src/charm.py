@@ -90,7 +90,7 @@ class CiliumCharm(CharmBase):
         self.hubble_manifests = HubbleManifests(self, self.config)
         self.collector = Collector(self.cilium_manifests, self.hubble_manifests)
 
-        self.jinja2_env = Environment(loader=FileSystemLoader("templates/"))
+        self.jinja2_env = Environment(loader=FileSystemLoader("templates/")) # nosec B701
         self.grafana_dashboard_provider = GrafanaDashboardProvider(self)
         self.remote_write_consumer = PrometheusRemoteWriteConsumer(self)
 
@@ -461,11 +461,11 @@ class CiliumCharm(CharmBase):
         # Extract only the required arch tar.gz file from the bundle
         tar = tarfile.open(path)
         with tempfile.TemporaryDirectory() as tmp:
-            tar.extractall(tmp, members=self._get_arch_cli_tools(tar, filename))
+            tar.extractall(tmp, members=self._get_arch_cli_tools(tar, filename), filter="data")
             tar.close()
             # Extract the binary
             arch_tgz = tarfile.open(Path(tmp) / filename)
-            arch_tgz.extractall(CLI_CLIENTS_PATH)
+            arch_tgz.extractall(CLI_CLIENTS_PATH, filter="data")
             arch_tgz.close()
 
 
