@@ -1,0 +1,40 @@
+# Preserve the charm's IPv4, kube-proxy and cluster-pool networking model.
+# Runtime charm patches still set the CIDR, mask, tunnel and metrics options.
+ipv4:
+  enabled: true
+ipv6:
+  enabled: false
+kubeProxyReplacement: false
+routingMode: tunnel
+tunnelProtocol: vxlan
+ipam:
+  mode: cluster-pool
+bpf:
+  masquerade: false
+  datapathMode: veth
+upgradeCompatibility: "1.16"
+prometheus:
+  enabled: true
+operator:
+  replicas: 2
+  prometheus:
+    enabled: true
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: false
+  tls:
+    auto:
+      method: cronJob
+  metrics:
+    enableOpenMetrics: true
+    enabled:
+      - dns
+      - drop
+      - tcp
+      - flow
+      - port-distribution
+      - icmp
+      - httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction

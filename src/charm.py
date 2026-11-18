@@ -80,6 +80,7 @@ class CiliumCharm(CharmBase):
             cilium_configured=False,
             hubble_configured=False,
             hubble_mismatch_config=False,
+            upgrade_held=False,
             unallowed_metrics=False,
             cilium_tunnel_protocol=None,
             cilium_tunnel_port=None,
@@ -149,6 +150,17 @@ class CiliumCharm(CharmBase):
 
         if not self._get_kubeconfig_status():
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
+
+        try:
+            upgrade_error = self.cilium_manifests.upgrade_error()
+        except (ManifestClientError, ApiError, HTTPError):
+            return self._ops_wait_for(event, "Waiting to determine installed Cilium version.")
+        if upgrade_error:
+            self.stored.upgrade_held = True
+            wait = upgrade_error.startswith("Waiting")
+            self.unit.status = (WaitingStatus if wait else BlockedStatus)(upgrade_error)
+            return
+        self.stored.upgrade_held = False
 
         log.info("Applying Cilium manifests")
 
@@ -360,6 +372,10 @@ class CiliumCharm(CharmBase):
             return
 
     def _on_update_status(self, event):
+        if self.stored.upgrade_held:
+            # A held version change is not retried by any other hook once the
+            # cluster condition clears; re-run it through the guard.
+            return self._on_config_changed(event)
         self._configure_cni_relation(event)
         self._set_active_status()
 

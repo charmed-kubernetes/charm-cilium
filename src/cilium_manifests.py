@@ -2,15 +2,17 @@
 
 import hashlib
 import json
+import re
 import logging
 import contextlib
 import httpx
 from datetime import datetime, timezone
 from pyroute2 import IPRoute
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.apps_v1 import DaemonSet
+from lightkube.resources.batch_v1 import Job
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
 
 log = logging.getLogger(__name__)
@@ -126,6 +128,10 @@ class PatchCiliumConfig(Patch):
             data["enable-session-affinity"] = "true"
 
 
+def _version(release: str) -> Tuple[int, ...]:
+    return tuple(map(int, release.split(".")))
+
+
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
 
@@ -175,6 +181,109 @@ class CiliumManifests(Manifests):
         hash = hashlib.sha256()
         hash.update(json_str.encode())
         return hash.hexdigest()
+
+    def _latest_patch(self, minor: Tuple[int, int]) -> Optional[str]:
+        """Return the newest bundled patch of a (major, minor) line, if bundled."""
+        patches = [release for release in self.releases if _version(release)[:2] == minor]
+        return max(patches, key=_version, default=None)
+
+    def _first_safe_step(self, current: str, target: str) -> Optional[str]:
+        """Return the release that starts a supported path from current towards target."""
+        before, after = _version(current), _version(target)
+        if before[0] != after[0]:
+            return None
+        if after[1] < before[1]:
+            return self._latest_patch((before[0], before[1] - 1))
+        latest = self._latest_patch(before[:2])
+        if latest and before < _version(latest):
+            return latest
+        return self._latest_patch((before[0], before[1] + 1))
+
+    def _stale_jobs(self) -> Optional[str]:
+        """Name a live Job that would reject the target's Job as an immutable-template change.
+
+        Job pod templates cannot be updated. Bundles up to 1.18 reuse the Job name
+        ``hubble-generate-certs`` with a new certgen image, and that Job only
+        disappears 30 minutes after it finishes (``ttlSecondsAfterFinished``).
+        """
+        for item in self.resources:
+            if item.kind != "Job":
+                continue
+            try:
+                live = self.client.get(Job, item.name, namespace=item.namespace)
+            except ApiError as error:
+                if error.status.code == 404:
+                    continue
+                raise
+            wanted = {c.name: c.image for c in item.resource.spec.template.spec.containers}
+            containers = live.spec.template.spec.containers if live.spec else []
+            if any(wanted.get(c.name, c.image) != c.image for c in containers or []):
+                return item.name
+        return None
+
+    def upgrade_error(self) -> Optional[str]:
+        """Reject unsupported hops using the installed DaemonSet, not desired config.
+
+        Cilium only tests adjacent-minor upgrades/rollbacks and requires the
+        latest patch of the current minor before moving forward. A fully rolled
+        out DaemonSet is required before starting another version transition.
+        The charm re-evaluates a held change on every ``update-status``, so a
+        condition fixed in the cluster needs no further operator action.
+        """
+        target = self.current_release
+        if target not in self.releases:
+            return f"Cilium {target} is not bundled; use the list-versions action."
+        try:
+            daemonset = self.client.get(DaemonSet, "cilium", namespace="kube-system")
+        except ApiError as error:
+            if error.status.code == 404:
+                return None  # Fresh installation, not an upgrade.
+            raise
+
+        containers = daemonset.spec.template.spec.containers if daemonset.spec else []
+        image = next(
+            (
+                container.image
+                for container in containers or []
+                if container.name == "cilium-agent"
+            ),
+            "",
+        )
+        match = re.search(r":v?(\d+\.\d+\.\d+)(?:@|$)", image or "")
+        if not match:
+            return (
+                "Cannot determine installed Cilium version; restore a version-tagged agent image."
+            )
+        current = match[1]
+        if current == target:
+            return None
+        before, after = _version(current), _version(target)
+        if before[0] != after[0] or abs(before[1] - after[1]) > 1:
+            step = self._first_safe_step(current, target)
+            path = f"start with release={step}" if step else "see the list-versions action"
+            return (
+                f"Unsafe Cilium transition {current} -> {target}; change one minor "
+                f"at a time and {path}."
+            )
+        latest_patch = self._latest_patch(before[:2]) or current
+        if after[1] > before[1] and before < _version(latest_patch):
+            return f"Set release={latest_patch} and wait for rollout before upgrading to {target}."
+        status, metadata = daemonset.status, daemonset.metadata
+        generation = metadata.generation if metadata else None
+        if (
+            status is None
+            or generation is None
+            or status.observedGeneration is None
+            or status.observedGeneration < generation
+            or not status.desiredNumberScheduled
+            or status.updatedNumberScheduled != status.desiredNumberScheduled
+            or status.numberReady != status.desiredNumberScheduled
+            or status.numberAvailable != status.desiredNumberScheduled
+        ):
+            return f"Waiting for the Cilium {current} rollout to finish before applying {target}."
+        if job := self._stale_jobs():
+            return f"Waiting for the previous Job {job} to expire before applying {target}."
+        return None
 
     @contextlib.contextmanager
     def restart_if_exists(self):

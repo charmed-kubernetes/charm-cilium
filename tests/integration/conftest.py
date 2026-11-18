@@ -38,7 +38,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--cilium-version",
         action="store",
-        default="1.16.10",
+        default="1.20.5",
         help="Cilium version to deploy",
     )
     parser.addoption(

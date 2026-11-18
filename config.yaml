@@ -60,8 +60,11 @@ options:
     description: |
       Enable the port-forward service for Hubble on each unit.
   release:
-    description: Version of Cilium to deploy
+    description: |
+      Version of Cilium to deploy. Upgrade one minor at a time, using the latest
+      bundled patch of the current minor first; see README.md for the upgrade path.
     type: string
+    default: "1.20.5"
   tunnel-protocol:
     type: string
     default: vxlan

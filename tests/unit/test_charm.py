@@ -89,7 +89,9 @@ def test_check_port_forward_service(harness, charm, input_data, expected_status)
 @mock.patch("charm.CiliumCharm._get_kubeconfig_status")
 @mock.patch("charm.CiliumCharm._configure_cilium_cni")
 @mock.patch("charm.CiliumCharm._configure_hubble")
+@mock.patch("cilium_manifests.CiliumManifests.upgrade_error", return_value=None)
 def test_configure_cilium(
+    mock_upgrade_error,
     mock_configure_hubble,
     mock_configure_cilium,
     mock_get_kubeconfig_status,
