@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.apps_v1 import DaemonSet
+from lightkube.resources.batch_v1 import Job
 from ops.model import BlockedStatus, WaitingStatus
 
 
@@ -58,19 +59,132 @@ def test_upgrade_hops(charm, harness, lk_client, current, target, allowed):
 
 def test_unknown_current_blocks(charm, lk_client):
     lk_client.get.return_value = installed_agent("quay.io/cilium/cilium@sha256:unknown")
-    assert "Cannot determine installed" in charm.cilium_manifests.upgrade_error()
+    assert "Cannot determine installed" in charm.cilium_manifests.upgrade_error().message
 
 
 def test_no_agent_container_blocks(charm, lk_client):
     daemonset = installed_agent("quay.io/cilium/cilium:v1.20.5")
     daemonset.spec.template.spec.containers[0].name = "unexpected"
     lk_client.get.return_value = daemonset
-    assert "Cannot determine installed" in charm.cilium_manifests.upgrade_error()
+    assert "Cannot determine installed" in charm.cilium_manifests.upgrade_error().message
 
 
 def test_unfinished_rollout_blocks_next_hop(charm, lk_client):
     lk_client.get.return_value = installed_agent("quay.io/cilium/cilium:v1.19.11", ready=False)
-    assert "rollout" in charm.cilium_manifests.upgrade_error()
+    block = charm.cilium_manifests.upgrade_error()
+    assert "rollout" in block.message
+    assert block.transient
+
+
+@pytest.mark.parametrize(
+    "current,target,first_step",
+    [
+        ("1.16.10", "1.20.5", "1.16.19"),
+        ("1.16.19", "1.20.5", "1.17.18"),
+        ("1.18.17", "1.20.5", "1.19.11"),
+        ("1.20.5", "1.16.19", "1.19.11"),
+        ("1.14.11", "1.17.18", "1.15.17"),
+    ],
+)
+def test_unsafe_hop_names_the_first_safe_step(
+    charm, harness, lk_client, current, target, first_step
+):
+    harness.disable_hooks()
+    harness.update_config({"release": target})
+    lk_client.get.return_value = installed_agent(f"ghcr.io/canonical/cdk/cilium/cilium:v{current}")
+    block = charm.cilium_manifests.upgrade_error()
+    assert f"release={first_step}" in block.message
+    assert "README" not in block.message
+    assert not block.transient
+
+
+def installed_job(image):
+    return Job.from_dict(
+        {
+            "metadata": {"name": "hubble-generate-certs", "namespace": "kube-system"},
+            "spec": {"template": {"spec": {"containers": [{"name": "certgen", "image": image}]}}},
+        }
+    )
+
+
+def serve(daemonset, job):
+    """Answer the guard's DaemonSet lookup and its Job lookup separately."""
+
+    def get(resource, name, namespace=None):
+        if resource is Job:
+            if isinstance(job, Exception):
+                raise job
+            return job
+        return daemonset
+
+    return get
+
+
+@pytest.mark.parametrize(
+    "current,target",
+    [("1.16.19", "1.17.18"), ("1.17.18", "1.18.17")],
+)
+def test_live_job_with_old_template_holds_the_hop(charm, harness, lk_client, current, target):
+    """Bundles up to 1.18 reuse the Job name; its pod template is immutable.
+
+    Applying the next minor while the previous (TTL 30 minutes) Job still exists would be
+    rejected by the API server after the DaemonSet had already been updated.
+    """
+    harness.disable_hooks()
+    harness.update_config({"release": current})
+    old = next(i for i in charm.cilium_manifests.resources if i.kind == "Job").resource
+    old_image = old.spec.template.spec.containers[0].image
+    harness.update_config({"release": target})
+    new = next(i for i in charm.cilium_manifests.resources if i.kind == "Job").resource
+    assert new.metadata.name == old.metadata.name
+    assert new.spec.template.spec.containers[0].image != old_image
+
+    agent = installed_agent(f"ghcr.io/canonical/cdk/cilium/cilium:v{current}")
+    lk_client.get.side_effect = serve(agent, installed_job(old_image))
+    block = charm.cilium_manifests.upgrade_error()
+    assert block.transient
+    assert "hubble-generate-certs" in block.message
+
+    lk_client.get.side_effect = serve(
+        agent, ApiError(status={"code": 404, "message": "Not found"})
+    )
+    assert charm.cilium_manifests.upgrade_error() is None
+
+    lk_client.get.side_effect = serve(
+        agent, installed_job(new.spec.template.spec.containers[0].image)
+    )
+    assert charm.cilium_manifests.upgrade_error() is None
+
+
+def test_transient_hold_retries_until_the_rollout_finishes(harness, lk_client):
+    """A hop requested mid-rollout is applied once the rollout completes.
+
+    ``update-status`` only re-evaluates it because the held event is deferred: the
+    framework re-emits deferred events at the start of every dispatch.
+    """
+    harness.begin()
+    charm = harness.charm
+    lk_client.get.return_value = installed_agent("quay.io/cilium/cilium:v1.19.11", ready=False)
+    with (
+        mock.patch.object(charm, "_get_kubeconfig_status", return_value=True),
+        mock.patch.object(charm, "_get_service_cidr", return_value="10.152.183.0/24"),
+        mock.patch.object(charm, "_install_cli_resources"),
+        mock.patch.object(charm, "_on_port_forward_hubble"),
+        mock.patch.object(charm.cilium_manifests, "restart_if_exists"),
+        mock.patch.object(charm.cilium_manifests, "apply_manifests") as cilium_apply,
+        mock.patch.object(charm.hubble_manifests, "apply_manifests") as hubble_apply,
+    ):
+        harness.update_config({"release": "1.20.5"})
+        assert isinstance(charm.unit.status, WaitingStatus)
+
+        harness.framework.reemit()  # what the next hook, e.g. update-status, does
+        cilium_apply.assert_not_called()  # still rolling out: the guard holds on retry
+        hubble_apply.assert_not_called()
+
+        lk_client.get.return_value = installed_agent("quay.io/cilium/cilium:v1.19.11")
+        harness.framework.reemit()
+        cilium_apply.assert_called_once()
+        assert charm.stored.cilium_configured
 
 
 def test_new_cluster_is_not_an_upgrade(charm, lk_client):
@@ -176,6 +290,12 @@ def test_refresh_rolls_out_the_schema_default(charm, harness, lk_client):
     default. Setting the schema default (not only ``upstream/<x>/version``) is what
     makes the hash change, so the new release actually reaches the cluster. This
     fails if the ``release`` option loses its explicit default.
+
+    Scope: this proves the hash/rollout mechanics for an install that is already
+    on the new default's release (a fresh install, or one that climbed the
+    ladder). ``apply_manifests`` is mocked, and an installed 1.16.10 is *not* rolled
+    to the default by a refresh: see
+    ``test_refresh_from_the_previous_default_is_held_by_the_guard``.
     """
     previous_default = "1.16.10"
     new_default = charm.cilium_manifests.current_release
@@ -209,6 +329,30 @@ def test_refresh_rolls_out_the_schema_default(charm, harness, lk_client):
 
     assert applied == [new_default]
     assert charm.stored.cilium_configured
+
+
+def test_refresh_from_the_previous_default_is_held_by_the_guard(harness, lk_client):
+    """A refresh from 1.16.10 changes the config hash but must not jump to 1.20.5."""
+    harness.begin()
+    charm = harness.charm
+    harness.disable_hooks()
+    harness.update_config({"release": "1.16.10"})
+    stored_hash = charm.cilium_manifests.config_hash
+    harness.update_config(unset=["release"])
+    assert charm.cilium_manifests.config_hash != stored_hash
+    harness.enable_hooks()
+
+    lk_client.get.return_value = installed_agent("quay.io/cilium/cilium:v1.16.10")
+    with (
+        mock.patch.object(charm, "_get_kubeconfig_status", return_value=True),
+        mock.patch.object(charm.cilium_manifests, "apply_manifests") as cilium_apply,
+        mock.patch.object(charm.hubble_manifests, "apply_manifests") as hubble_apply,
+    ):
+        charm.on.config_changed.emit()
+    cilium_apply.assert_not_called()
+    hubble_apply.assert_not_called()
+    assert isinstance(charm.unit.status, BlockedStatus)
+    assert "release=1.16.19" in charm.unit.status.message
 
 
 @pytest.mark.parametrize("hook", ["config_changed", "cni_relation_changed"])

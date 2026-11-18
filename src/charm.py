@@ -155,7 +155,9 @@ class CiliumCharm(CharmBase):
         except (ManifestClientError, ApiError, HTTPError):
             return self._ops_wait_for(event, "Waiting to determine installed Cilium version.")
         if upgrade_error:
-            self.unit.status = BlockedStatus(upgrade_error)
+            if upgrade_error.transient:
+                return self._ops_wait_for(event, upgrade_error.message)
+            self.unit.status = BlockedStatus(upgrade_error.message)
             return
 
         log.info("Applying Cilium manifests")

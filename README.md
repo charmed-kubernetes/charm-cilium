@@ -60,9 +60,15 @@ preflight checks. Set `juju config cilium release=<next-version>` one step at a
 time, and wait for every agent and operator to become ready before continuing.
 Check pod/service connectivity, DNS, NetworkPolicy and Hubble after each hop.
 Coordinate the Kubernetes upgrade separately: intermediate Cilium versions are
-not all supported on Kubernetes 1.36. If a release change was blocked during a
-rollout, wait for readiness, set `release` back to the installed version, then
-retry the next step. The charm does not orchestrate these upgrades automatically.
+not all supported on Kubernetes 1.36. The charm does not orchestrate these
+upgrades automatically.
+
+A blocked unit names the next release to set (for example `release=1.16.19` on
+1.16.10). If the charm reports `waiting` because the installed DaemonSet is still
+rolling out, or because the previous `hubble-generate-certs` Job (30-minute TTL
+in the 1.16 to 1.18 bundles, immutable pod template) has not expired yet, it
+applies the requested release on its own when that clears; no `release` change is
+needed. Nothing is applied while it waits.
 
 ### Manifest provenance
 
@@ -72,6 +78,11 @@ relay**, from the same Cilium chart; it contains neither Hubble UI nor the Hubbl
 CLI. Relay uses the Cilium version (for example `v1.20.5`). CLI resources are
 independent: the Hubble CLI's 1.20 release is `v1.20.4`, not `v1.20.5`, and the
 existing `fetch-resources.sh` resource pipeline is unchanged.
+
+`upstream/values.yaml` sets `upgradeCompatibility: "1.16"` for every bundle, which
+makes the chart render 1.17+ defaults in their 1.16-compatible form, notably
+`enable-policy-secrets-sync` stays off. That is correct for clusters upgraded from
+1.16 and is the open question for fresh 1.20.5 installs noted in the pull request.
 
 Regenerate only explicit released chart versions with Helm 3:
 

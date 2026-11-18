@@ -8,10 +8,11 @@ import contextlib
 import httpx
 from datetime import datetime, timezone
 from pyroute2 import IPRoute
-from typing import Dict, Optional
+from typing import Dict, NamedTuple, Optional, Tuple
 
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.apps_v1 import DaemonSet
+from lightkube.resources.batch_v1 import Job
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
 
 log = logging.getLogger(__name__)
@@ -127,6 +128,17 @@ class PatchCiliumConfig(Patch):
             data["enable-session-affinity"] = "true"
 
 
+class UpgradeBlock(NamedTuple):
+    """Why the installed Cilium cannot move to the configured release yet."""
+
+    message: str
+    transient: bool = False
+
+
+def _version(release: str) -> Tuple[int, ...]:
+    return tuple(map(int, release.split(".")))
+
+
 class CiliumManifests(Manifests):
     """Deployment manager for the Cilium charm."""
 
@@ -177,16 +189,57 @@ class CiliumManifests(Manifests):
         hash.update(json_str.encode())
         return hash.hexdigest()
 
-    def upgrade_error(self) -> Optional[str]:
+    def _latest_patch(self, minor: Tuple[int, int]) -> Optional[str]:
+        """Return the newest bundled patch of a (major, minor) line, if bundled."""
+        patches = [release for release in self.releases if _version(release)[:2] == minor]
+        return max(patches, key=_version, default=None)
+
+    def _first_safe_step(self, current: str, target: str) -> Optional[str]:
+        """Return the release that starts a supported path from current towards target."""
+        before, after = _version(current), _version(target)
+        if before[0] != after[0]:
+            return None
+        if after[1] < before[1]:
+            return self._latest_patch((before[0], before[1] - 1))
+        latest = self._latest_patch(before[:2])
+        if latest and before < _version(latest):
+            return latest
+        return self._latest_patch((before[0], before[1] + 1))
+
+    def _stale_jobs(self) -> Optional[str]:
+        """Name a live Job that would reject the target's Job as an immutable-template change.
+
+        Job pod templates cannot be updated. Bundles up to 1.18 reuse the Job name
+        ``hubble-generate-certs`` with a new certgen image, and that Job only
+        disappears 30 minutes after it finishes (``ttlSecondsAfterFinished``).
+        """
+        for item in self.resources:
+            if item.kind != "Job":
+                continue
+            try:
+                live = self.client.get(Job, item.name, namespace=item.namespace)
+            except ApiError as error:
+                if error.status.code == 404:
+                    continue
+                raise
+            wanted = {c.name: c.image for c in item.resource.spec.template.spec.containers}
+            containers = live.spec.template.spec.containers if live.spec else []
+            if any(wanted.get(c.name, c.image) != c.image for c in containers or []):
+                return item.name
+        return None
+
+    def upgrade_error(self) -> Optional[UpgradeBlock]:
         """Reject unsupported hops using the installed DaemonSet, not desired config.
 
         Cilium only tests adjacent-minor upgrades/rollbacks and requires the
         latest patch of the current minor before moving forward. A fully rolled
         out DaemonSet is required before starting another version transition.
+        Conditions that clear by themselves are marked ``transient`` so the
+        charm retries them; the others need the operator to change ``release``.
         """
         target = self.current_release
         if target not in self.releases:
-            return f"Cilium {target} is not bundled; use the list-versions action."
+            return UpgradeBlock(f"Cilium {target} is not bundled; use the list-versions action.")
         try:
             daemonset = self.client.get(DaemonSet, "cilium", namespace="kube-system")
         except ApiError as error:
@@ -205,30 +258,25 @@ class CiliumManifests(Manifests):
         )
         match = re.search(r":v?(\d+\.\d+\.\d+)(?:@|$)", image or "")
         if not match:
-            return (
+            return UpgradeBlock(
                 "Cannot determine installed Cilium version; restore a version-tagged agent image."
             )
         current = match[1]
         if current == target:
             return None
-        before = tuple(map(int, current.split(".")))
-        after = tuple(map(int, target.split(".")))
+        before, after = _version(current), _version(target)
         if before[0] != after[0] or abs(before[1] - after[1]) > 1:
-            return (
-                f"Unsafe Cilium transition {current} -> {target}; set release to each "
-                "intermediate minor in turn (see README.md)."
+            step = self._first_safe_step(current, target)
+            path = f"start with release={step}" if step else "see the list-versions action"
+            return UpgradeBlock(
+                f"Unsafe Cilium transition {current} -> {target}; change one minor "
+                f"at a time and {path}."
             )
-        latest_patch = max(
-            (
-                release
-                for release in self.releases
-                if tuple(map(int, release.split(".")))[:2] == before[:2]
-            ),
-            key=lambda release: tuple(map(int, release.split("."))),
-            default=current,
-        )
-        if after[1] > before[1] and before < tuple(map(int, latest_patch.split("."))):
-            return f"Set release={latest_patch} and wait for rollout before upgrading to {target}."
+        latest_patch = self._latest_patch(before[:2]) or current
+        if after[1] > before[1] and before < _version(latest_patch):
+            return UpgradeBlock(
+                f"Set release={latest_patch} and wait for rollout before upgrading to {target}."
+            )
         status, metadata = daemonset.status, daemonset.metadata
         generation = metadata.generation if metadata else None
         if (
@@ -241,7 +289,15 @@ class CiliumManifests(Manifests):
             or status.numberReady != status.desiredNumberScheduled
             or status.numberAvailable != status.desiredNumberScheduled
         ):
-            return f"Wait for Cilium {current} rollout to finish, then retry the release change."
+            return UpgradeBlock(
+                f"Waiting for the Cilium {current} rollout to finish before applying {target}.",
+                transient=True,
+            )
+        if job := self._stale_jobs():
+            return UpgradeBlock(
+                f"Waiting for the previous Job {job} to expire before applying {target}.",
+                transient=True,
+            )
         return None
 
     @contextlib.contextmanager
