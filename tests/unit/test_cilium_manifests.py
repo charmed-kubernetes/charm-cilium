@@ -171,6 +171,7 @@ def test_held_change_recovers_on_update_status(harness, lk_client, held, status)
     lk_client.get.return_value = held
     with (
         mock.patch.object(charm, "_get_kubeconfig_status", return_value=True),
+        mock.patch.object(charm, "_environment_issues", return_value=[]),
         mock.patch.object(charm, "_get_service_cidr", return_value="10.152.183.0/24"),
         mock.patch.object(charm, "_install_cli_resources"),
         mock.patch.object(charm, "_on_port_forward_hubble"),
@@ -354,6 +355,7 @@ def test_refresh_from_the_previous_default_is_held_by_the_guard(harness, lk_clie
     lk_client.get.return_value = installed_agent("quay.io/cilium/cilium:v1.16.10")
     with (
         mock.patch.object(charm, "_get_kubeconfig_status", return_value=True),
+        mock.patch.object(charm, "_environment_issues", return_value=[]),
         mock.patch.object(charm.cilium_manifests, "apply_manifests") as cilium_apply,
         mock.patch.object(charm.hubble_manifests, "apply_manifests") as hubble_apply,
     ):
