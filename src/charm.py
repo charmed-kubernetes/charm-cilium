@@ -150,6 +150,14 @@ class CiliumCharm(CharmBase):
         if not self._get_kubeconfig_status():
             return self._ops_wait_for(event, "Waiting for Kubernetes API", exc_info=True)
 
+        try:
+            upgrade_error = self.cilium_manifests.upgrade_error()
+        except (ManifestClientError, ApiError, HTTPError):
+            return self._ops_wait_for(event, "Waiting to determine installed Cilium version.")
+        if upgrade_error:
+            self.unit.status = BlockedStatus(upgrade_error)
+            return
+
         log.info("Applying Cilium manifests")
 
         self._configure_hubble(event)

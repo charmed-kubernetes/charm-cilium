@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import logging
 import contextlib
 import httpx
@@ -175,6 +176,73 @@ class CiliumManifests(Manifests):
         hash = hashlib.sha256()
         hash.update(json_str.encode())
         return hash.hexdigest()
+
+    def upgrade_error(self) -> Optional[str]:
+        """Reject unsupported hops using the installed DaemonSet, not desired config.
+
+        Cilium only tests adjacent-minor upgrades/rollbacks and requires the
+        latest patch of the current minor before moving forward. A fully rolled
+        out DaemonSet is required before starting another version transition.
+        """
+        target = self.current_release
+        if target not in self.releases:
+            return f"Cilium {target} is not bundled; use the list-versions action."
+        try:
+            daemonset = self.client.get(DaemonSet, "cilium", namespace="kube-system")
+        except ApiError as error:
+            if error.status.code == 404:
+                return None  # Fresh installation, not an upgrade.
+            raise
+
+        containers = daemonset.spec.template.spec.containers if daemonset.spec else []
+        image = next(
+            (
+                container.image
+                for container in containers or []
+                if container.name == "cilium-agent"
+            ),
+            "",
+        )
+        match = re.search(r":v?(\d+\.\d+\.\d+)(?:@|$)", image or "")
+        if not match:
+            return (
+                "Cannot determine installed Cilium version; restore a version-tagged agent image."
+            )
+        current = match[1]
+        if current == target:
+            return None
+        before = tuple(map(int, current.split(".")))
+        after = tuple(map(int, target.split(".")))
+        if before[0] != after[0] or abs(before[1] - after[1]) > 1:
+            return (
+                f"Unsafe Cilium transition {current} -> {target}; set release to each "
+                "intermediate minor in turn (see README.md)."
+            )
+        latest_patch = max(
+            (
+                release
+                for release in self.releases
+                if tuple(map(int, release.split(".")))[:2] == before[:2]
+            ),
+            key=lambda release: tuple(map(int, release.split("."))),
+            default=current,
+        )
+        if after[1] > before[1] and before < tuple(map(int, latest_patch.split("."))):
+            return f"Set release={latest_patch} and wait for rollout before upgrading to {target}."
+        status, metadata = daemonset.status, daemonset.metadata
+        generation = metadata.generation if metadata else None
+        if (
+            status is None
+            or generation is None
+            or status.observedGeneration is None
+            or status.observedGeneration < generation
+            or not status.desiredNumberScheduled
+            or status.updatedNumberScheduled != status.desiredNumberScheduled
+            or status.numberReady != status.desiredNumberScheduled
+            or status.numberAvailable != status.desiredNumberScheduled
+        ):
+            return f"Wait for Cilium {current} rollout to finish, then retry the release change."
+        return None
 
     @contextlib.contextmanager
     def restart_if_exists(self):
