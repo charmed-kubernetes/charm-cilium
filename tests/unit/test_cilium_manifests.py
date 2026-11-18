@@ -209,3 +209,25 @@ def test_refresh_rolls_out_the_schema_default(charm, harness, lk_client):
 
     assert applied == [new_default]
     assert charm.stored.cilium_configured
+
+
+@pytest.mark.parametrize("hook", ["config_changed", "cni_relation_changed"])
+def test_unsafe_hop_blocks_every_apply_hook(charm, harness, lk_client, hook):
+    """Both hooks that can apply manifests are stopped by the hop guard."""
+    lk_client.get.return_value = installed_agent("quay.io/cilium/cilium:v1.16.10")
+    with (
+        mock.patch.object(charm, "_get_kubeconfig_status", return_value=True),
+        mock.patch.object(charm.cilium_manifests, "apply_manifests") as cilium_apply,
+        mock.patch.object(charm.hubble_manifests, "apply_manifests") as hubble_apply,
+    ):
+        if hook == "config_changed":
+            charm.on.config_changed.emit()
+        else:
+            relation_id = harness.add_relation("cni", "kubernetes-control-plane")
+            harness.add_relation_unit(relation_id, "kubernetes-control-plane/0")
+            harness.update_relation_data(
+                relation_id, "kubernetes-control-plane/0", {"kubeconfig-hash": "abc"}
+            )
+    cilium_apply.assert_not_called()
+    hubble_apply.assert_not_called()
+    assert isinstance(charm.unit.status, BlockedStatus)
