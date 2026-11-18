@@ -63,12 +63,14 @@ Coordinate the Kubernetes upgrade separately: intermediate Cilium versions are
 not all supported on Kubernetes 1.36. The charm does not orchestrate these
 upgrades automatically.
 
-A blocked unit names the next release to set (for example `release=1.16.19` on
-1.16.10). If the charm reports `waiting` because the installed DaemonSet is still
-rolling out, or because the previous `hubble-generate-certs` Job (30-minute TTL
-in the 1.16 to 1.18 bundles, immutable pod template) has not expired yet, it
-applies the requested release on its own when that clears; no `release` change is
-needed. Nothing is applied while it waits.
+A held unit names the next release to set (for example `release=1.16.19` on
+1.16.10). The charm re-evaluates a held change on every `update-status`, so it
+recovers by itself once the cause is gone: an unfinished DaemonSet rollout (the
+unit shows `waiting`), a previous `hubble-generate-certs` Job (30-minute TTL in
+the 1.16 to 1.18 bundles, immutable pod template) that has not expired yet, or an
+unreadable agent image that was restored. No `release` change is needed for
+those, and nothing is applied while the change is held. Changing `release`
+re-evaluates it immediately.
 
 ### Manifest provenance
 

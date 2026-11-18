@@ -8,7 +8,7 @@ import contextlib
 import httpx
 from datetime import datetime, timezone
 from pyroute2 import IPRoute
-from typing import Dict, NamedTuple, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.apps_v1 import DaemonSet
@@ -128,13 +128,6 @@ class PatchCiliumConfig(Patch):
             data["enable-session-affinity"] = "true"
 
 
-class UpgradeBlock(NamedTuple):
-    """Why the installed Cilium cannot move to the configured release yet."""
-
-    message: str
-    transient: bool = False
-
-
 def _version(release: str) -> Tuple[int, ...]:
     return tuple(map(int, release.split(".")))
 
@@ -228,18 +221,18 @@ class CiliumManifests(Manifests):
                 return item.name
         return None
 
-    def upgrade_error(self) -> Optional[UpgradeBlock]:
+    def upgrade_error(self) -> Optional[str]:
         """Reject unsupported hops using the installed DaemonSet, not desired config.
 
         Cilium only tests adjacent-minor upgrades/rollbacks and requires the
         latest patch of the current minor before moving forward. A fully rolled
         out DaemonSet is required before starting another version transition.
-        Conditions that clear by themselves are marked ``transient`` so the
-        charm retries them; the others need the operator to change ``release``.
+        The charm re-evaluates a held change on every ``update-status``, so a
+        condition fixed in the cluster needs no further operator action.
         """
         target = self.current_release
         if target not in self.releases:
-            return UpgradeBlock(f"Cilium {target} is not bundled; use the list-versions action.")
+            return f"Cilium {target} is not bundled; use the list-versions action."
         try:
             daemonset = self.client.get(DaemonSet, "cilium", namespace="kube-system")
         except ApiError as error:
@@ -258,7 +251,7 @@ class CiliumManifests(Manifests):
         )
         match = re.search(r":v?(\d+\.\d+\.\d+)(?:@|$)", image or "")
         if not match:
-            return UpgradeBlock(
+            return (
                 "Cannot determine installed Cilium version; restore a version-tagged agent image."
             )
         current = match[1]
@@ -268,15 +261,13 @@ class CiliumManifests(Manifests):
         if before[0] != after[0] or abs(before[1] - after[1]) > 1:
             step = self._first_safe_step(current, target)
             path = f"start with release={step}" if step else "see the list-versions action"
-            return UpgradeBlock(
+            return (
                 f"Unsafe Cilium transition {current} -> {target}; change one minor "
                 f"at a time and {path}."
             )
         latest_patch = self._latest_patch(before[:2]) or current
         if after[1] > before[1] and before < _version(latest_patch):
-            return UpgradeBlock(
-                f"Set release={latest_patch} and wait for rollout before upgrading to {target}."
-            )
+            return f"Set release={latest_patch} and wait for rollout before upgrading to {target}."
         status, metadata = daemonset.status, daemonset.metadata
         generation = metadata.generation if metadata else None
         if (
@@ -289,15 +280,9 @@ class CiliumManifests(Manifests):
             or status.numberReady != status.desiredNumberScheduled
             or status.numberAvailable != status.desiredNumberScheduled
         ):
-            return UpgradeBlock(
-                f"Waiting for the Cilium {current} rollout to finish before applying {target}.",
-                transient=True,
-            )
+            return f"Waiting for the Cilium {current} rollout to finish before applying {target}."
         if job := self._stale_jobs():
-            return UpgradeBlock(
-                f"Waiting for the previous Job {job} to expire before applying {target}.",
-                transient=True,
-            )
+            return f"Waiting for the previous Job {job} to expire before applying {target}."
         return None
 
     @contextlib.contextmanager
